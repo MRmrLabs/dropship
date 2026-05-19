@@ -53,9 +53,11 @@ Los tokens se guardan localmente en `data/meli_tokens.json`, que esta ignorado p
 .\test.ps1
 ```
 
-## Deploy en Render
+## Deploy en Render Free
 
-El repo incluye `render.yaml` para crear un Web Service Python con disco persistente en `data/`.
+El repo incluye `render.yaml` para crear un Web Service Python en el plan gratis de Render.
+
+Importante: Render Free no tiene Persistent Disk. La base SQLite y los tokens OAuth guardados en `data/` pueden perderse despues de redeploys, reinicios o limpiezas del servicio. Para produccion real, usa Render Starter con Persistent Disk o migra la app a Render Postgres.
 
 Variables que debes configurar en Render:
 
@@ -66,3 +68,5 @@ MELI_REDIRECT_URI=https://tu-servicio.onrender.com/auth/meli/callback
 ```
 
 En Mercado Libre Developers, registra exactamente el mismo `MELI_REDIRECT_URI`.
+
+Si el servicio se reinicia y Mercado Libre aparece desconectado, vuelve a entrar a Integraciones y completa OAuth otra vez.
