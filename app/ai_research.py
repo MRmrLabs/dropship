@@ -106,9 +106,27 @@ def max_candidates() -> int:
 def build_research_prompt(query: str | None) -> str:
     search_query = query or default_query()
     return f"""
-Busca en internet proveedores reales en Mexico para mayoreo o dropshipping de accesorios tecnologicos.
-Prioriza distribuidores mexicanos, factura, envio nacional, precios visibles o catalogos consultables.
-No inventes datos. Si un costo, stock o envio no esta claro, marca el campo como estimado y explica el riesgo.
+Actua como comprador experto de e-commerce en Mexico. Busca oportunidades reales, no productos genericos faciles de descartar.
+
+Objetivo: encontrar productos de accesorios tecnologicos con mayor probabilidad de ser vendibles en Mercado Libre Mexico con margen neto mayor a 15%.
+
+Busca proveedores reales en Mexico para mayoreo, distribucion autorizada o venta B2B.
+Prioriza candidatos con evidencia publica de:
+- factura o RFC/razon social;
+- envio nacional en Mexico;
+- catalogo, precio, lista de mayoreo o producto con precio visible;
+- proveedor mexicano o distribuidor con operacion clara en Mexico;
+- productos de bajo riesgo: hubs USB-C, soportes, organizadores, accesorios ergonomicos, cables certificados genericos, perifericos sin marca restringida.
+
+Evita traer candidatos si solo encuentras:
+- marketplaces retail sin margen claro;
+- publicaciones de otros vendedores de Mercado Libre/Amazon como "proveedor";
+- marcas restringidas o sensibles sin autorizacion;
+- productos con precio proveedor casi igual al precio de venta;
+- proveedor sin forma clara de validar factura/contacto.
+
+No inventes datos. Si no hay al menos una fuente que apoye proveedor + producto, no incluyas el candidato.
+Si el costo/stock/envio no esta claro pero el proveedor parece real, marca el riesgo y baja la confianza.
 
 Consulta: {search_query}
 
@@ -137,14 +155,16 @@ Devuelve solamente JSON valido, sin markdown, con esta forma exacta:
   ]
 }}
 
-Limita a {max_candidates()} candidatos. Responde compacto. Evita marcas con restricciones fuertes si no hay evidencia clara de autorizacion.
+Limita a {max_candidates()} candidatos. Responde compacto.
+Ordena primero los mejores candidatos: mejor evidencia de proveedor, menor riesgo, margen estimado mas sano.
+Si no encuentras candidatos buenos, devuelve "candidates": [] y explica en summary que no hubo evidencia suficiente.
 """.strip()
 
 
 def default_query() -> str:
     return (
-        "proveedores mayoristas Mexico accesorios tecnologia cables usb c hubs cargadores "
-        "soportes laptop perifericos con factura envio nacional"
+        "distribuidor mayorista Mexico accesorios tecnologia factura hubs usb c soportes ergonomicos "
+        "organizadores escritorio perifericos bajo riesgo precio mayoreo envio nacional"
     )
 
 

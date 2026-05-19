@@ -42,7 +42,7 @@ const statusLabel = {
 };
 
 const defaultDiscoveryQuery =
-  "proveedores mayoristas Mexico accesorios tecnologia cables usb c hubs cargadores factura envio nacional";
+  "distribuidor mayorista Mexico accesorios tecnologia factura hubs usb c soportes ergonomicos organizadores escritorio perifericos bajo riesgo precio mayoreo envio nacional";
 
 let busy = false;
 
@@ -92,6 +92,7 @@ function renderOpportunities() {
     return;
   }
   target.innerHTML = state.opportunities
+    .filter((item) => item.signal !== "red")
     .map(
       (item) => `
       <article class="card">
@@ -107,15 +108,24 @@ function renderOpportunities() {
         <p>Margen neto ${pct(item.net_margin_rate)} · utilidad ${money(item.net_profit)}</p>
         <p class="muted">Costo ${money(item.cost)} + envio proveedor ${money(item.supplier_shipping)} · stock ${item.stock}</p>
         ${renderRisks(item.risks)}
-        <div class="actions">
-          <button class="primary" onclick="createDraft(${item.product_id})" ${item.signal === "red" ? "disabled" : ""}>Crear borrador</button>
-          <button onclick="createOrder(${item.product_id})">Crear orden</button>
-          <button onclick="rejectOpportunity(${item.product_id})">Rechazar</button>
-        </div>
+        ${renderOpportunityActions(item)}
       </article>
     `
     )
     .join("");
+}
+
+function renderOpportunityActions(item) {
+  if (item.signal === "red") {
+    return `<div class="actions"><button onclick="rejectOpportunity(${item.product_id})">Sacar descartado</button></div>`;
+  }
+  return `
+    <div class="actions">
+      <button class="primary" onclick="createDraft(${item.product_id})">Crear borrador</button>
+      <button onclick="createOrder(${item.product_id})">Crear orden</button>
+      <button onclick="rejectOpportunity(${item.product_id})">Rechazar</button>
+    </div>
+  `;
 }
 
 function renderRisks(risks) {
@@ -406,7 +416,7 @@ async function discoverAndAnalyze() {
       logProgress(`Importando: ${title}`);
       try {
         const payload = await importCandidate(research.id, index, { silent: true });
-        logProgress(`Producto ${payload.product_id} importado y analizado.`, "done");
+        logProgress(`Producto ${payload.product_id} importado; descartados malos se ocultan automaticamente.`, "done");
       } catch (error) {
         logProgress(`No se importo ${title}: ${error.message}`, "error");
       }

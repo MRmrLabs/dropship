@@ -201,7 +201,7 @@ def fetch_products() -> list[dict[str, Any]]:
             SELECT p.*, s.name AS supplier_name, s.reliability AS supplier_reliability
             FROM supplier_products p
             JOIN suppliers s ON s.id = p.supplier_id
-            WHERE p.status = 'active'
+            WHERE p.status = 'active' AND o.signal IN ('green', 'yellow')
             ORDER BY p.id DESC
             """
         ).fetchall()
@@ -459,6 +459,24 @@ def reject_product(product_id: int) -> None:
         if cur.rowcount == 0:
             raise KeyError("Producto no encontrado")
         conn.execute("DELETE FROM opportunities WHERE product_id = ?", (product_id,))
+
+
+def reject_red_opportunities() -> int:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT product_id
+            FROM opportunities
+            WHERE signal = 'red' OR score < 55
+            """
+        ).fetchall()
+        product_ids = [row["product_id"] for row in rows]
+        if not product_ids:
+            return 0
+        placeholders = ",".join("?" for _ in product_ids)
+        conn.execute(f"UPDATE supplier_products SET status = 'rejected' WHERE id IN ({placeholders})", product_ids)
+        conn.execute(f"DELETE FROM opportunities WHERE product_id IN ({placeholders})", product_ids)
+        return len(product_ids)
 
 
 def ensure_supplier_from_candidate(conn: sqlite3.Connection, candidate: dict[str, Any]) -> int:

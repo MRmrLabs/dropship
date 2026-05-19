@@ -37,6 +37,7 @@ from app.storage import (
     insert_purchase_order,
     latest_ai_research_run,
     reject_product,
+    reject_red_opportunities,
     seed_demo_data,
     update_listing_status,
     upsert_opportunity,
@@ -192,7 +193,8 @@ class Handler(BaseHTTPRequestHandler):
             opportunity = analyze_product(product, supplier)
             upsert_opportunity(opportunity)
             created += 1
-        self.send_json({"ok": True, "analyzed": created})
+        rejected = reject_red_opportunities()
+        self.send_json({"ok": True, "analyzed": created, "auto_rejected": rejected})
 
     def create_listing_draft(self, product_id: int) -> None:
         product, supplier = get_product_and_supplier(product_id)
