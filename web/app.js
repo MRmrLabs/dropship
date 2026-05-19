@@ -42,7 +42,7 @@ const statusLabel = {
 };
 
 const defaultDiscoveryQuery =
-  "distribuidor mayorista Mexico accesorios tecnologia factura hubs usb c soportes ergonomicos organizadores escritorio perifericos bajo riesgo precio mayoreo envio nacional";
+  "productos especificos para comprar mayoreo Mexico accesorios tecnologia hub usb c modelo precio proveedor vender mercado libre precio sugerido";
 
 let busy = false;
 
@@ -296,7 +296,7 @@ function renderCandidate(runId, candidate, index) {
       ${risks.length ? `<ul class="risk-list">${risks.map((risk) => `<li>${risk}</li>`).join("")}</ul>` : ""}
       <p>${urls.map((url) => `<a href="${url}" target="_blank" rel="noreferrer">Fuente</a>`).join(" · ")}</p>
       <div class="actions">
-        <button onclick="importCandidate(${runId}, ${index})">Importar para analizar</button>
+        <button onclick="importCandidate(${runId}, ${index})">Reimportar</button>
       </div>
     </div>
   `;
@@ -351,7 +351,7 @@ async function runAiSearch(query) {
       method: "POST",
       body: JSON.stringify({ query: query || defaultDiscoveryQuery }),
     });
-    logProgress("Busqueda guardada con fuentes.", "done");
+    logProgress("Busqueda guardada; productos importados automaticamente a Oportunidades.", "done");
     await refresh();
   } catch (error) {
     status.textContent = error.message;
@@ -402,7 +402,9 @@ async function discoverAndAnalyze() {
       body: JSON.stringify({ query }),
     });
     const candidates = research.result?.candidates || [];
+    const imported = research.imported || [];
     logProgress(`IA regreso ${candidates.length} candidato(s).`, "done");
+    logProgress(`Importacion automatica: ${imported.length} resultado(s).`, "done");
 
     if (!candidates.length) {
       logProgress("No hubo candidatos importables en esta busqueda.", "error");
@@ -411,16 +413,15 @@ async function discoverAndAnalyze() {
 
     for (let index = 0; index < candidates.length; index += 1) {
       const candidate = candidates[index];
+      const result = imported[index];
       const title = candidate.product_title || `candidato ${index + 1}`;
-      logProgress(`Importando: ${title}`);
-      try {
-        const payload = await importCandidate(research.id, index, { silent: true });
-        logProgress(`Producto ${payload.product_id} importado; descartados malos se ocultan automaticamente.`, "done");
-      } catch (error) {
-        logProgress(`No se importo ${title}: ${error.message}`, "error");
+      if (result?.product_id) {
+        logProgress(`${title}: importado como producto ${result.product_id} (${result.status}).`, "done");
+      } else {
+        logProgress(`${title}: ${result?.status || "no importado"}.`, "error");
       }
-      await refresh();
     }
+    await refresh();
 
     logProgress("Tablero actualizado. Revisa Oportunidades y rechaza lo que no sirva.", "done");
   } catch (error) {

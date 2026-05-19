@@ -230,7 +230,21 @@ class Handler(BaseHTTPRequestHandler):
         query = payload.get("query") or None
         result = research_products(query)
         run_id = insert_ai_research_run(result.get("query") or "", "completed", result)
-        self.send_json({"ok": True, "id": run_id, "result": result}, 201)
+        imported: list[dict[str, int | str]] = []
+        for index, candidate in enumerate(result.get("candidates", [])):
+            try:
+                product_id = import_ai_candidate(run_id, index)
+                product, supplier = get_product_and_supplier(product_id)
+                opportunity = analyze_product(product, supplier)
+                upsert_opportunity(opportunity)
+                imported.append({"product_id": product_id, "status": opportunity.signal.value})
+            except Exception as exc:
+                imported.append({"product_id": 0, "status": f"skipped: {exc}"})
+        rejected = reject_red_opportunities()
+        self.send_json(
+            {"ok": True, "id": run_id, "result": result, "imported": imported, "auto_rejected": rejected},
+            201,
+        )
 
     def read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))

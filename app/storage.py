@@ -414,7 +414,11 @@ def import_ai_candidate(run_id: int, candidate_index: int) -> int:
         if existing:
             return int(existing["id"])
         cost = float(candidate.get("estimated_cost_mxn") or 0)
-        market_price = float(candidate.get("estimated_market_price_mxn") or 0)
+        market_price = float(
+            candidate.get("suggested_sale_price_mxn")
+            or candidate.get("estimated_market_price_mxn")
+            or 0
+        )
         if cost <= 0 or market_price <= 0:
             raise ValueError("El candidato no tiene costo o precio estimado suficiente para analizar")
         stock_signal = str(candidate.get("stock_signal") or "desconocido").lower()

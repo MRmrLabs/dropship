@@ -108,15 +108,21 @@ def build_research_prompt(query: str | None) -> str:
     return f"""
 Actua como comprador experto de e-commerce en Mexico. Busca oportunidades reales, no productos genericos faciles de descartar.
 
-Objetivo: encontrar productos de accesorios tecnologicos con mayor probabilidad de ser vendibles en Mercado Libre Mexico con margen neto mayor a 15%.
+Objetivo: encontrar productos concretos, comprables y revendibles en Mercado Libre Mexico con margen neto mayor a 15%.
 
 Busca proveedores reales en Mexico para mayoreo, distribucion autorizada o venta B2B.
+Cada candidato debe ser un producto especifico, no una categoria. Ejemplos buenos:
+- "Hub USB-C 7 en 1 UGREEN CM512" con liga directa de proveedor, costo estimado y precio sugerido;
+- "Soporte laptop aluminio ajustable marca X modelo Y";
+- "Cable USB-C a USB-C 100W 2m marca/modelo especifico".
+
 Prioriza candidatos con evidencia publica de:
 - factura o RFC/razon social;
 - envio nacional en Mexico;
 - catalogo, precio, lista de mayoreo o producto con precio visible;
 - proveedor mexicano o distribuidor con operacion clara en Mexico;
 - productos de bajo riesgo: hubs USB-C, soportes, organizadores, accesorios ergonomicos, cables certificados genericos, perifericos sin marca restringida.
+- una URL donde se pueda comprar o solicitar mayoreo.
 
 Evita traer candidatos si solo encuentras:
 - marketplaces retail sin margen claro;
@@ -144,19 +150,20 @@ Devuelve solamente JSON valido, sin markdown, con esta forma exacta:
       "estimated_cost_mxn": 0,
       "estimated_shipping_mxn": 0,
       "estimated_market_price_mxn": 0,
+      "suggested_sale_price_mxn": 0,
       "stock_signal": "alto|medio|bajo|desconocido",
       "warranty": "texto breve",
       "lead_time_days": 3,
       "source_urls": ["https://..."],
       "risk_flags": ["riesgo"],
       "confidence": 0.0,
-      "notes": "por que podria venderse y que validar"
+      "notes": "comprarlo aqui, venderlo a este precio y que validar"
     }}
   ]
 }}
 
 Limita a {max_candidates()} candidatos. Responde compacto.
-Ordena primero los mejores candidatos: mejor evidencia de proveedor, menor riesgo, margen estimado mas sano.
+Ordena primero los mejores candidatos: producto mas especifico, liga de compra mas clara, menor riesgo, margen estimado mas sano.
 Si no encuentras candidatos buenos, devuelve "candidates": [] y explica en summary que no hubo evidencia suficiente.
 """.strip()
 

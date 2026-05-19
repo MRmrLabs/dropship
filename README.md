@@ -19,7 +19,7 @@ El servidor usa solo Python estandar y SQLite. La base se crea en `data/dropship
 ## Flujo MVP
 
 1. Buscar proveedores y productos reales con IA web o capturarlos manualmente.
-2. Importar candidatos con fuentes verificables.
+2. Importar automaticamente candidatos con fuentes verificables.
 3. Analizar oportunidades con reglas de margen, stock, marca, imagenes y competencia.
 4. Generar borradores de Mercado Libre para oportunidades verdes.
 5. Aprobar borradores antes de publicar.
