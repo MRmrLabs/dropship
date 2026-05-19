@@ -88,7 +88,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(fetch_suppliers())
         elif path == "/api/products":
             self.send_json(fetch_products())
-        elif path == "/api/opportunities":
+        elif path in {"/api/opportunities", "/api/opportunity-list"}:
             self.send_json(fetch_opportunities())
         elif path == "/api/listing-drafts":
             self.send_json(fetch_listing_drafts())

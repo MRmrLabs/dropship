@@ -41,7 +41,7 @@ async function refresh() {
   const [suppliers, products, opportunities, drafts, orders, meli] = await Promise.all([
     api("/api/suppliers"),
     api("/api/products"),
-    api("/api/opportunities"),
+    api("/api/opportunity-list"),
     api("/api/listing-drafts"),
     api("/api/purchase-orders"),
     api("/api/integrations/meli/status"),
