@@ -23,6 +23,7 @@
         <button class="tab" data-tab="drafts">Borradores</button>
         <button class="tab" data-tab="orders">Ordenes</button>
         <button class="tab" data-tab="suppliers">Proveedores</button>
+        <button class="tab" data-tab="aiSearch">Busqueda IA</button>
         <button class="tab" data-tab="integrations">Integraciones</button>
       </nav>
 
@@ -56,6 +57,19 @@
           <p>Distribuidores mexicanos con factura, envio y autorizacion de recursos.</p>
         </div>
         <div id="supplierList" class="list"></div>
+      </section>
+
+      <section id="aiSearch" class="panel">
+        <div class="section-head">
+          <h2>Busqueda IA</h2>
+          <p>Busca proveedores reales en internet y guarda candidatos con fuentes antes de importarlos.</p>
+        </div>
+        <form id="aiSearchForm" class="searchbar">
+          <input id="aiQuery" type="search" placeholder="proveedores Mexico accesorios tecnologia cables hubs cargadores">
+          <button class="primary" type="submit">Buscar con IA</button>
+        </form>
+        <div id="aiStatus" class="notice"></div>
+        <div id="aiResearchList" class="list"></div>
       </section>
 
       <section id="integrations" class="panel">

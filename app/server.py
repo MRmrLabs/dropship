@@ -17,16 +17,20 @@ from app.domain import (
     build_listing_draft,
     build_purchase_checklist,
 )
+from app.ai_research import openai_status, research_products
 from app.meli_auth import build_authorization_url, exchange_code, fetch_me, integration_status
 from app.storage import (
     ROOT,
+    fetch_ai_research_runs,
     fetch_listing_drafts,
     fetch_opportunities,
     fetch_products,
     fetch_purchase_orders,
     fetch_suppliers,
     get_product_and_supplier,
+    import_ai_candidate,
     init_db,
+    insert_ai_research_run,
     insert_listing_draft,
     insert_purchase_order,
     seed_demo_data,
@@ -100,6 +104,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"url": build_authorization_url()})
         elif path == "/api/integrations/meli/me":
             self.send_json(fetch_me())
+        elif path == "/api/integrations/openai/status":
+            self.send_json(openai_status())
+        elif path == "/api/ai/research-runs":
+            self.send_json(fetch_ai_research_runs())
         else:
             raise ApiError(404, "Ruta API no encontrada")
 
@@ -112,6 +120,13 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/purchase-orders":
             payload = self.read_json()
             self.create_purchase_order(payload)
+        elif path == "/api/ai/research":
+            payload = self.read_json()
+            self.create_ai_research(payload)
+        elif path == "/api/ai/import-candidate":
+            payload = self.read_json()
+            product_id = import_ai_candidate(int(payload["run_id"]), int(payload["candidate_index"]))
+            self.send_json({"ok": True, "product_id": product_id}, 201)
         else:
             raise ApiError(404, "Ruta API no encontrada")
 
@@ -185,6 +200,12 @@ class Handler(BaseHTTPRequestHandler):
         }
         order_id = insert_purchase_order(order)
         self.send_json({"ok": True, "id": order_id}, 201)
+
+    def create_ai_research(self, payload: dict) -> None:
+        query = payload.get("query") or None
+        result = research_products(query)
+        run_id = insert_ai_research_run(result.get("query") or "", "completed", result)
+        self.send_json({"ok": True, "id": run_id, "result": result}, 201)
 
     def read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))

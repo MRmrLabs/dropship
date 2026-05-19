@@ -5,6 +5,8 @@ const state = {
   drafts: [],
   orders: [],
   meli: null,
+  openai: null,
+  aiRuns: [],
 };
 
 const api = async (path, options = {}) => {
@@ -38,15 +40,17 @@ const statusLabel = {
 };
 
 async function refresh() {
-  const [suppliers, products, opportunities, drafts, orders, meli] = await Promise.all([
+  const [suppliers, products, opportunities, drafts, orders, meli, openai, aiRuns] = await Promise.all([
     api("/api/suppliers"),
     api("/api/products"),
     api("/api/opportunity-list"),
     api("/api/listing-drafts"),
     api("/api/purchase-orders"),
     api("/api/integrations/meli/status"),
+    api("/api/integrations/openai/status"),
+    api("/api/ai/research-runs"),
   ]);
-  Object.assign(state, { suppliers, products, opportunities, drafts, orders, meli });
+  Object.assign(state, { suppliers, products, opportunities, drafts, orders, meli, openai, aiRuns });
   render();
 }
 
@@ -56,6 +60,7 @@ function render() {
   renderDrafts();
   renderOrders();
   renderSuppliers();
+  renderAiResearch();
   renderIntegrations();
 }
 
@@ -191,6 +196,7 @@ function renderSuppliers() {
 function renderIntegrations() {
   const target = document.querySelector("#integrationList");
   const meli = state.meli || {};
+  const openai = state.openai || {};
   target.innerHTML = `
     <article class="row">
       <div>
@@ -207,6 +213,74 @@ function renderIntegrations() {
         <button onclick="checkMeliMe()" ${!meli.connected ? "disabled" : ""}>Verificar cuenta</button>
       </div>
     </article>
+    <article class="row">
+      <div>
+        <h3>OpenAI Web Search</h3>
+        <div class="meta">
+          <span class="pill ${openai.configured ? "green" : "yellow"}">${openai.configured ? "API key configurada" : "Falta OPENAI_API_KEY"}</span>
+          <span class="pill">${openai.model || "gpt-5"}</span>
+          <span class="pill">${openai.tool || "web_search"}</span>
+        </div>
+        <p>Esta integracion usa busqueda web real y devuelve fuentes para validar cada candidato.</p>
+      </div>
+    </article>
+  `;
+}
+
+function renderAiResearch() {
+  const target = document.querySelector("#aiResearchList");
+  const status = document.querySelector("#aiStatus");
+  const openai = state.openai || {};
+  status.textContent = openai.configured
+    ? `OpenAI listo con ${openai.model || "gpt-5"} y web_search.`
+    : "Falta configurar OPENAI_API_KEY en Render o en tu .env local.";
+  if (!state.aiRuns.length) {
+    target.innerHTML = `<article class="row"><div><h3>Sin busquedas reales todavia</h3><p>Ejecuta una busqueda para encontrar proveedores y productos con fuentes.</p></div></article>`;
+    return;
+  }
+  target.innerHTML = state.aiRuns
+    .map((run) => renderAiRun(run))
+    .join("");
+}
+
+function renderAiRun(run) {
+  const result = run.result || {};
+  const candidates = result.candidates || [];
+  return `
+    <article class="row">
+      <div>
+        <h3>${result.summary || run.query}</h3>
+        <div class="meta">
+          <span class="pill">${run.status}</span>
+          <span class="pill">${candidates.length} candidatos</span>
+          <span class="pill">${run.created_at}</span>
+        </div>
+        ${candidates.map((candidate, index) => renderCandidate(run.id, candidate, index)).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderCandidate(runId, candidate, index) {
+  const urls = Array.isArray(candidate.source_urls) ? candidate.source_urls : [];
+  const risks = Array.isArray(candidate.risk_flags) ? candidate.risk_flags : [];
+  return `
+    <div class="card">
+      <h3>${candidate.product_title || "Producto candidato"}</h3>
+      <div class="meta">
+        <span class="pill">${candidate.supplier_name || "Proveedor"}</span>
+        <span class="pill">${candidate.category || "categoria"}</span>
+        <span class="pill">Confianza ${Math.round(Number(candidate.confidence || 0) * 100)}%</span>
+      </div>
+      <p class="money">${money(candidate.estimated_market_price_mxn || 0)}</p>
+      <p>Costo estimado ${money(candidate.estimated_cost_mxn || 0)} · envio ${money(candidate.estimated_shipping_mxn || 0)}</p>
+      <p class="muted">${candidate.notes || "Validar condiciones con proveedor."}</p>
+      ${risks.length ? `<ul class="risk-list">${risks.map((risk) => `<li>${risk}</li>`).join("")}</ul>` : ""}
+      <p>${urls.map((url) => `<a href="${url}" target="_blank" rel="noreferrer">Fuente</a>`).join(" · ")}</p>
+      <div class="actions">
+        <button onclick="importCandidate(${runId}, ${index})">Importar para analizar</button>
+      </div>
+    </div>
   `;
 }
 
@@ -248,9 +322,33 @@ async function checkMeliMe() {
   alert(`Mercado Libre conectado: ${payload.nickname || payload.id}`);
 }
 
+async function runAiSearch(query) {
+  document.querySelector("#aiStatus").textContent = "Buscando en internet con IA...";
+  await api("/api/ai/research", {
+    method: "POST",
+    body: JSON.stringify({ query }),
+  });
+  await refresh();
+}
+
+async function importCandidate(runId, candidateIndex) {
+  const payload = await api("/api/ai/import-candidate", {
+    method: "POST",
+    body: JSON.stringify({ run_id: runId, candidate_index: candidateIndex }),
+  });
+  await api("/api/analyze", { method: "POST" });
+  await refresh();
+  alert(`Candidato importado como producto ${payload.product_id}. Ya puedes verlo en Oportunidades.`);
+}
+
 document.querySelector("#analyzeBtn").addEventListener("click", async () => {
   await api("/api/analyze", { method: "POST" });
   await refresh();
+});
+
+document.querySelector("#aiSearchForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await runAiSearch(document.querySelector("#aiQuery").value);
 });
 
 document.querySelectorAll(".tab").forEach((button) => {

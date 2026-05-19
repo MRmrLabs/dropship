@@ -104,6 +104,14 @@ def init_db() -> None:
                 tracking_number TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS ai_research_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query TEXT NOT NULL,
+                status TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
 
@@ -423,3 +431,110 @@ def fetch_purchase_orders() -> list[dict[str, Any]]:
             item["checklist"] = json.loads(item["checklist"])
             output.append(item)
         return output
+
+
+def insert_ai_research_run(query: str, status: str, result: dict[str, Any]) -> int:
+    with connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO ai_research_runs (query, status, result_json)
+            VALUES (?, ?, ?)
+            """,
+            (query, status, json.dumps(result, ensure_ascii=True)),
+        )
+        return int(cur.lastrowid)
+
+
+def fetch_ai_research_runs() -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM ai_research_runs ORDER BY created_at DESC LIMIT 10"
+        ).fetchall()
+        output = []
+        for row in rows:
+            item = dict(row)
+            item["result"] = json.loads(item.pop("result_json"))
+            output.append(item)
+        return output
+
+
+def import_ai_candidate(run_id: int, candidate_index: int) -> int:
+    with connect() as conn:
+        run = conn.execute("SELECT * FROM ai_research_runs WHERE id = ?", (run_id,)).fetchone()
+        if not run:
+            raise KeyError("Investigacion IA no encontrada")
+        result = json.loads(run["result_json"])
+        candidates = result.get("candidates", [])
+        if candidate_index < 0 or candidate_index >= len(candidates):
+            raise KeyError("Candidato IA no encontrado")
+        candidate = candidates[candidate_index]
+        supplier_id = ensure_supplier_from_candidate(conn, candidate)
+        sku = f"AI-{run_id}-{candidate_index + 1}"
+        existing = conn.execute("SELECT id FROM supplier_products WHERE sku = ?", (sku,)).fetchone()
+        if existing:
+            return int(existing["id"])
+        cost = float(candidate.get("estimated_cost_mxn") or 0)
+        market_price = float(candidate.get("estimated_market_price_mxn") or 0)
+        if cost <= 0 or market_price <= 0:
+            raise ValueError("El candidato no tiene costo o precio estimado suficiente para analizar")
+        stock_signal = str(candidate.get("stock_signal") or "desconocido").lower()
+        stock = {"alto": 30, "medio": 12, "bajo": 3}.get(stock_signal, 1)
+        cur = conn.execute(
+            """
+            INSERT INTO supplier_products
+            (supplier_id, sku, title, brand, category, cost, supplier_shipping, stock, warranty,
+             lead_time_days, image_url, product_url, assets_authorized, market_competition_price, competition_level)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                supplier_id,
+                sku,
+                str(candidate.get("product_title") or "Producto investigado por IA")[:120],
+                str(candidate.get("brand") or "Generico")[:80],
+                str(candidate.get("category") or "perifericos").lower(),
+                cost,
+                float(candidate.get("estimated_shipping_mxn") or 0),
+                stock,
+                str(candidate.get("warranty") or "Validar con proveedor")[:120],
+                int(candidate.get("lead_time_days") or 3),
+                "",
+                first_source_url(candidate),
+                0,
+                market_price,
+                "medium",
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def ensure_supplier_from_candidate(conn: sqlite3.Connection, candidate: dict[str, Any]) -> int:
+    name = str(candidate.get("supplier_name") or "Proveedor IA").strip()
+    existing = conn.execute("SELECT id FROM suppliers WHERE name = ?", (name,)).fetchone()
+    if existing:
+        return int(existing["id"])
+    cur = conn.execute(
+        """
+        INSERT INTO suppliers
+        (name, country, website, contact, terms, shipping_type, reliability, invoices, authorized_assets)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            name,
+            "Mexico",
+            str(candidate.get("supplier_website") or first_source_url(candidate))[:300],
+            str(candidate.get("supplier_contact") or "Validar contacto")[:160],
+            "Proveedor encontrado por IA; validar precio, stock, factura y autorizacion de imagenes",
+            "Validar envio nacional",
+            int(float(candidate.get("confidence") or 0.5) * 100),
+            0,
+            0,
+        ),
+    )
+    return int(cur.lastrowid)
+
+
+def first_source_url(candidate: dict[str, Any]) -> str:
+    urls = candidate.get("source_urls") or []
+    if isinstance(urls, list) and urls:
+        return str(urls[0])
+    return str(candidate.get("supplier_website") or "")
