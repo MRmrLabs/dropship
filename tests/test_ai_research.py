@@ -14,6 +14,10 @@ class AiResearchTests(unittest.TestCase):
         parsed = parse_json_object('```json\n{"summary":"ok","candidates":[]}\n```')
         self.assertEqual(parsed["candidates"], [])
 
+    def test_parse_json_object_repairs_trailing_commas(self):
+        parsed = parse_json_object('{"summary":"ok","candidates":[{"product_title":"Cable",}],}')
+        self.assertEqual(parsed["candidates"][0]["product_title"], "Cable")
+
     @patch.dict("os.environ", {"AI_DAILY_SEARCH_LIMIT": "3"}, clear=False)
     def test_daily_limit_blocks_extra_searches(self):
         with self.assertRaisesRegex(ValueError, "Limite diario"):

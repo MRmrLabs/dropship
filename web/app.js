@@ -41,6 +41,11 @@ const statusLabel = {
   rejected: "Rechazado",
 };
 
+const defaultDiscoveryQuery =
+  "proveedores mayoristas Mexico accesorios tecnologia cables usb c hubs cargadores factura envio nacional";
+
+let busy = false;
+
 async function refresh() {
   const [suppliers, products, opportunities, drafts, orders, meli, openai, aiRuns] = await Promise.all([
     api("/api/suppliers"),
@@ -330,24 +335,32 @@ async function runAiSearch(query) {
   const status = document.querySelector("#aiStatus");
   status.textContent = "Buscando en internet con IA...";
   try {
+    openProgress("Busqueda IA en internet");
+    logProgress("Preparando busqueda con limite de costo activo.");
+    logProgress(`Consulta: ${query || defaultDiscoveryQuery}`);
     await api("/api/ai/research", {
       method: "POST",
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query: query || defaultDiscoveryQuery }),
     });
+    logProgress("Busqueda guardada con fuentes.", "done");
     await refresh();
   } catch (error) {
     status.textContent = error.message;
+    logProgress(error.message, "error");
   }
 }
 
-async function importCandidate(runId, candidateIndex) {
+async function importCandidate(runId, candidateIndex, options = {}) {
   const payload = await api("/api/ai/import-candidate", {
     method: "POST",
     body: JSON.stringify({ run_id: runId, candidate_index: candidateIndex }),
   });
   await api("/api/analyze", { method: "POST" });
   await refresh();
-  alert(`Candidato importado como producto ${payload.product_id}. Ya puedes verlo en Oportunidades.`);
+  if (!options.silent) {
+    alert(`Candidato importado como producto ${payload.product_id}. Ya puedes verlo en Oportunidades.`);
+  }
+  return payload;
 }
 
 async function rejectOpportunity(productId) {
@@ -358,10 +371,81 @@ async function rejectOpportunity(productId) {
   await refresh();
 }
 
+async function discoverAndAnalyze() {
+  if (busy) return;
+  busy = true;
+  document.querySelector("#analyzeBtn").disabled = true;
+  openProgress("Buscando oportunidades reales");
+  try {
+    await refresh();
+    if (!state.openai?.configured) {
+      throw new Error("Falta configurar OPENAI_API_KEY en Render.");
+    }
+    if ((state.openai.searches_today || 0) >= (state.openai.daily_limit || 3)) {
+      throw new Error("Limite diario de busquedas IA alcanzado.");
+    }
+
+    const query = document.querySelector("#aiQuery")?.value || defaultDiscoveryQuery;
+    logProgress(`Llamando IA web con ${state.openai.model || "gpt-4.1-mini"}.`);
+    logProgress("Buscando proveedores reales con fuentes verificables.");
+    const research = await api("/api/ai/research", {
+      method: "POST",
+      body: JSON.stringify({ query }),
+    });
+    const candidates = research.result?.candidates || [];
+    logProgress(`IA regreso ${candidates.length} candidato(s).`, "done");
+
+    if (!candidates.length) {
+      logProgress("No hubo candidatos importables en esta busqueda.", "error");
+      return;
+    }
+
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      const title = candidate.product_title || `candidato ${index + 1}`;
+      logProgress(`Importando: ${title}`);
+      try {
+        const payload = await importCandidate(research.id, index, { silent: true });
+        logProgress(`Producto ${payload.product_id} importado y analizado.`, "done");
+      } catch (error) {
+        logProgress(`No se importo ${title}: ${error.message}`, "error");
+      }
+      await refresh();
+    }
+
+    logProgress("Tablero actualizado. Revisa Oportunidades y rechaza lo que no sirva.", "done");
+  } catch (error) {
+    logProgress(error.message, "error");
+  } finally {
+    busy = false;
+    document.querySelector("#analyzeBtn").disabled = false;
+    await refresh();
+  }
+}
+
+function openProgress(title) {
+  document.querySelector("#progressTitle").textContent = title;
+  document.querySelector("#progressLog").innerHTML = "";
+  document.querySelector("#progressModal").classList.remove("hidden");
+}
+
+function logProgress(message, type = "") {
+  const item = document.createElement("li");
+  item.textContent = message;
+  if (type) item.classList.add(type);
+  document.querySelector("#progressLog").appendChild(item);
+  item.scrollIntoView({ block: "nearest" });
+}
+
+function closeProgress() {
+  document.querySelector("#progressModal").classList.add("hidden");
+}
+
 document.querySelector("#analyzeBtn").addEventListener("click", async () => {
-  await api("/api/analyze", { method: "POST" });
-  await refresh();
+  await discoverAndAnalyze();
 });
+
+document.querySelector("#progressClose").addEventListener("click", closeProgress);
 
 document.querySelector("#aiSearchForm").addEventListener("submit", async (event) => {
   event.preventDefault();

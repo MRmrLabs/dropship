@@ -165,13 +165,23 @@ def parse_json_object(text: str) -> dict[str, Any]:
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?", "", cleaned).strip()
         cleaned = re.sub(r"```$", "", cleaned).strip()
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-        if not match:
-            raise ValueError("La IA no devolvio JSON parseable")
-        return json.loads(match.group(0))
+    candidates = [cleaned]
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if match:
+        candidates.append(match.group(0))
+    for candidate in candidates:
+        for variant in (candidate, repair_json_text(candidate)):
+            try:
+                return json.loads(variant)
+            except json.JSONDecodeError:
+                continue
+    raise ValueError("La IA devolvio JSON invalido. Intenta de nuevo con una busqueda mas especifica.")
+
+
+def repair_json_text(text: str) -> str:
+    repaired = text.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
+    repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+    return repaired
 
 
 def extract_sources(raw: dict[str, Any]) -> list[dict[str, str]]:
