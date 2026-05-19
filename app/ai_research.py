@@ -3,11 +3,15 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import datetime, timezone
 from typing import Any
 from urllib.request import Request, urlopen
 
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+DEFAULT_DAILY_LIMIT = 3
+DEFAULT_MIN_INTERVAL_SECONDS = 300
+DEFAULT_MAX_CANDIDATES = 4
 
 
 def openai_status() -> dict[str, Any]:
@@ -15,6 +19,11 @@ def openai_status() -> dict[str, Any]:
         "configured": bool(os.environ.get("OPENAI_API_KEY")),
         "model": os.environ.get("OPENAI_WEB_MODEL", "gpt-5"),
         "tool": "web_search",
+        "daily_limit": int(os.environ.get("AI_DAILY_SEARCH_LIMIT", DEFAULT_DAILY_LIMIT)),
+        "min_interval_seconds": int(
+            os.environ.get("AI_MIN_SECONDS_BETWEEN_SEARCHES", DEFAULT_MIN_INTERVAL_SECONDS)
+        ),
+        "max_candidates": int(os.environ.get("AI_MAX_CANDIDATES", DEFAULT_MAX_CANDIDATES)),
     }
 
 
@@ -61,9 +70,32 @@ def research_products(query: str | None = None) -> dict[str, Any]:
     parsed = parse_json_object(output_text)
     parsed.setdefault("query", query or default_query())
     parsed.setdefault("candidates", [])
+    parsed["candidates"] = parsed["candidates"][: max_candidates()]
     parsed["raw_response_id"] = raw.get("id")
     parsed["sources"] = extract_sources(raw)
     return parsed
+
+
+def enforce_usage_limits(today_count: int, latest_run: dict[str, Any] | None) -> None:
+    limit = int(os.environ.get("AI_DAILY_SEARCH_LIMIT", DEFAULT_DAILY_LIMIT))
+    if today_count >= limit:
+        raise ValueError(f"Limite diario de busquedas IA alcanzado ({limit}). Intenta manana.")
+    min_seconds = int(os.environ.get("AI_MIN_SECONDS_BETWEEN_SEARCHES", DEFAULT_MIN_INTERVAL_SECONDS))
+    if not latest_run:
+        return
+    created_at = str(latest_run.get("created_at") or "")
+    try:
+        latest = datetime.fromisoformat(created_at.replace(" ", "T")).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return
+    elapsed = (datetime.now(timezone.utc) - latest).total_seconds()
+    if elapsed < min_seconds:
+        wait = int(min_seconds - elapsed)
+        raise ValueError(f"Espera {wait} segundos antes de otra busqueda IA.")
+
+
+def max_candidates() -> int:
+    return max(1, min(8, int(os.environ.get("AI_MAX_CANDIDATES", DEFAULT_MAX_CANDIDATES))))
 
 
 def build_research_prompt(query: str | None) -> str:
@@ -100,7 +132,7 @@ Devuelve solamente JSON valido, sin markdown, con esta forma exacta:
   ]
 }}
 
-Limita a 6 candidatos. Evita marcas con restricciones fuertes si no hay evidencia clara de autorizacion.
+Limita a {max_candidates()} candidatos. Evita marcas con restricciones fuertes si no hay evidencia clara de autorizacion.
 """.strip()
 
 
@@ -151,4 +183,3 @@ def extract_sources(raw: dict[str, Any]) -> list[dict[str, str]]:
             seen.add(url)
             sources.append({"url": url, "title": source.get("title", url)})
     return sources
-

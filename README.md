@@ -32,6 +32,14 @@ Amazon queda como placeholder de fase 2 para SP-API.
 
 La busqueda real de proveedores usa OpenAI Responses API con la herramienta `web_search`. Requiere `OPENAI_API_KEY`; la app guarda cada investigacion y muestra fuentes para validacion manual.
 
+Por seguridad de costos, la busqueda IA tiene limites configurables:
+
+```text
+AI_DAILY_SEARCH_LIMIT=3
+AI_MIN_SECONDS_BETWEEN_SEARCHES=300
+AI_MAX_CANDIDATES=4
+```
+
 ### Conectar Mercado Libre
 
 1. Regenera el Client Secret si fue compartido fuera del panel de Mercado Libre.
@@ -44,6 +52,9 @@ MELI_CLIENT_SECRET=tu_client_secret_regenerado
 MELI_REDIRECT_URI=http://127.0.0.1:8787/auth/meli/callback
 OPENAI_API_KEY=tu_openai_api_key
 OPENAI_WEB_MODEL=gpt-5
+AI_DAILY_SEARCH_LIMIT=3
+AI_MIN_SECONDS_BETWEEN_SEARCHES=300
+AI_MAX_CANDIDATES=4
 ```
 
 4. En Mercado Libre Developers, configura exactamente la misma Redirect URI.
@@ -71,6 +82,9 @@ MELI_CLIENT_SECRET=tu_secret_regenerado
 MELI_REDIRECT_URI=https://tu-servicio.onrender.com/auth/meli/callback
 OPENAI_API_KEY=tu_openai_api_key
 OPENAI_WEB_MODEL=gpt-5
+AI_DAILY_SEARCH_LIMIT=3
+AI_MIN_SECONDS_BETWEEN_SEARCHES=300
+AI_MAX_CANDIDATES=4
 ```
 
 En Mercado Libre Developers, registra exactamente el mismo `MELI_REDIRECT_URI`.

@@ -20,3 +20,9 @@ services:
         sync: false
       - key: OPENAI_WEB_MODEL
         value: gpt-5
+      - key: AI_DAILY_SEARCH_LIMIT
+        value: 3
+      - key: AI_MIN_SECONDS_BETWEEN_SEARCHES
+        value: 300
+      - key: AI_MAX_CANDIDATES
+        value: 4

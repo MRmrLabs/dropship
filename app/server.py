@@ -17,7 +17,7 @@ from app.domain import (
     build_listing_draft,
     build_purchase_checklist,
 )
-from app.ai_research import openai_status, research_products
+from app.ai_research import enforce_usage_limits, openai_status, research_products
 from app.meli_auth import build_authorization_url, exchange_code, fetch_me, integration_status
 from app.storage import (
     ROOT,
@@ -27,12 +27,14 @@ from app.storage import (
     fetch_products,
     fetch_purchase_orders,
     fetch_suppliers,
+    count_ai_research_runs_today,
     get_product_and_supplier,
     import_ai_candidate,
     init_db,
     insert_ai_research_run,
     insert_listing_draft,
     insert_purchase_order,
+    latest_ai_research_run,
     seed_demo_data,
     update_listing_status,
     upsert_opportunity,
@@ -105,7 +107,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/integrations/meli/me":
             self.send_json(fetch_me())
         elif path == "/api/integrations/openai/status":
-            self.send_json(openai_status())
+            status = openai_status()
+            status["searches_today"] = count_ai_research_runs_today()
+            self.send_json(status)
         elif path == "/api/ai/research-runs":
             self.send_json(fetch_ai_research_runs())
         else:
@@ -202,6 +206,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True, "id": order_id}, 201)
 
     def create_ai_research(self, payload: dict) -> None:
+        enforce_usage_limits(count_ai_research_runs_today(), latest_ai_research_run())
         query = payload.get("query") or None
         result = research_products(query)
         run_id = insert_ai_research_run(result.get("query") or "", "completed", result)

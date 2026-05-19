@@ -458,6 +458,26 @@ def fetch_ai_research_runs() -> list[dict[str, Any]]:
         return output
 
 
+def count_ai_research_runs_today() -> int:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM ai_research_runs
+            WHERE status = 'completed' AND date(created_at) = date('now')
+            """
+        ).fetchone()
+        return int(row["total"])
+
+
+def latest_ai_research_run() -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM ai_research_runs ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def import_ai_candidate(run_id: int, candidate_index: int) -> int:
     with connect() as conn:
         run = conn.execute("SELECT * FROM ai_research_runs WHERE id = ?", (run_id,)).fetchone()

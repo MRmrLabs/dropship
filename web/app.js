@@ -19,6 +19,8 @@ const api = async (path, options = {}) => {
   return payload;
 };
 
+const secondsToMinutes = (value) => `${Math.ceil(Number(value || 0) / 60)} min`;
+
 const money = (value) =>
   Number(value).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
 
@@ -232,7 +234,7 @@ function renderAiResearch() {
   const status = document.querySelector("#aiStatus");
   const openai = state.openai || {};
   status.textContent = openai.configured
-    ? `OpenAI listo con ${openai.model || "gpt-5"} y web_search.`
+    ? `OpenAI listo. Limite: ${openai.searches_today || 0}/${openai.daily_limit || 3} busquedas hoy, espera minima ${secondsToMinutes(openai.min_interval_seconds || 300)}, maximo ${openai.max_candidates || 4} candidatos.`
     : "Falta configurar OPENAI_API_KEY en Render o en tu .env local.";
   if (!state.aiRuns.length) {
     target.innerHTML = `<article class="row"><div><h3>Sin busquedas reales todavia</h3><p>Ejecuta una busqueda para encontrar proveedores y productos con fuentes.</p></div></article>`;
@@ -323,12 +325,17 @@ async function checkMeliMe() {
 }
 
 async function runAiSearch(query) {
-  document.querySelector("#aiStatus").textContent = "Buscando en internet con IA...";
-  await api("/api/ai/research", {
-    method: "POST",
-    body: JSON.stringify({ query }),
-  });
-  await refresh();
+  const status = document.querySelector("#aiStatus");
+  status.textContent = "Buscando en internet con IA...";
+  try {
+    await api("/api/ai/research", {
+      method: "POST",
+      body: JSON.stringify({ query }),
+    });
+    await refresh();
+  } catch (error) {
+    status.textContent = error.message;
+  }
 }
 
 async function importCandidate(runId, candidateIndex) {
