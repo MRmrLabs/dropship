@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: neobot-dropshipping-tech-mx
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app/server.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: DATA_DIR
+        value: /opt/render/project/src/data
+      - key: MELI_CLIENT_ID
+        sync: false
+      - key: MELI_CLIENT_SECRET
+        sync: false
+      - key: MELI_REDIRECT_URI
+        sync: false
+    disk:
+      name: neobot-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
