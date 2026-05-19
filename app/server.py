@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -66,6 +67,10 @@ class Handler(BaseHTTPRequestHandler):
             self.serve_static(parsed.path)
         except ApiError as exc:
             self.send_json({"error": exc.message}, exc.status)
+        except TimeoutError:
+            self.send_json({"error": "OpenAI tardo demasiado. Intenta una busqueda mas especifica."}, 504)
+        except socket.timeout:
+            self.send_json({"error": "OpenAI tardo demasiado. Intenta una busqueda mas especifica."}, 504)
         except Exception as exc:
             self.send_json({"error": str(exc)}, 500)
 
@@ -75,6 +80,10 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_api_post(parsed.path)
         except ApiError as exc:
             self.send_json({"error": exc.message}, exc.status)
+        except TimeoutError:
+            self.send_json({"error": "OpenAI tardo demasiado. Intenta una busqueda mas especifica."}, 504)
+        except socket.timeout:
+            self.send_json({"error": "OpenAI tardo demasiado. Intenta una busqueda mas especifica."}, 504)
         except Exception as exc:
             self.send_json({"error": str(exc)}, 500)
 
@@ -84,6 +93,10 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_api_patch(parsed.path)
         except ApiError as exc:
             self.send_json({"error": exc.message}, exc.status)
+        except TimeoutError:
+            self.send_json({"error": "OpenAI tardo demasiado. Intenta una busqueda mas especifica."}, 504)
+        except socket.timeout:
+            self.send_json({"error": "OpenAI tardo demasiado. Intenta una busqueda mas especifica."}, 504)
         except Exception as exc:
             self.send_json({"error": str(exc)}, 500)
 

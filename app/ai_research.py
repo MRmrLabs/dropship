@@ -12,18 +12,22 @@ OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 DEFAULT_DAILY_LIMIT = 3
 DEFAULT_MIN_INTERVAL_SECONDS = 300
 DEFAULT_MAX_CANDIDATES = 4
+DEFAULT_MODEL = "gpt-4.1-mini"
+DEFAULT_TIMEOUT_SECONDS = 60
+DEFAULT_MAX_OUTPUT_TOKENS = 1600
 
 
 def openai_status() -> dict[str, Any]:
     return {
         "configured": bool(os.environ.get("OPENAI_API_KEY")),
-        "model": os.environ.get("OPENAI_WEB_MODEL", "gpt-5"),
+        "model": os.environ.get("OPENAI_WEB_MODEL", DEFAULT_MODEL),
         "tool": "web_search",
         "daily_limit": int(os.environ.get("AI_DAILY_SEARCH_LIMIT", DEFAULT_DAILY_LIMIT)),
         "min_interval_seconds": int(
             os.environ.get("AI_MIN_SECONDS_BETWEEN_SEARCHES", DEFAULT_MIN_INTERVAL_SECONDS)
         ),
         "max_candidates": int(os.environ.get("AI_MAX_CANDIDATES", DEFAULT_MAX_CANDIDATES)),
+        "request_timeout_seconds": int(os.environ.get("OPENAI_REQUEST_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)),
     }
 
 
@@ -34,8 +38,8 @@ def research_products(query: str | None = None) -> dict[str, Any]:
 
     prompt = build_research_prompt(query)
     payload = {
-        "model": os.environ.get("OPENAI_WEB_MODEL", "gpt-5"),
-        "reasoning": {"effort": "low"},
+        "model": os.environ.get("OPENAI_WEB_MODEL", DEFAULT_MODEL),
+        "max_output_tokens": int(os.environ.get("OPENAI_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)),
         "tools": [
             {
                 "type": "web_search",
@@ -63,7 +67,8 @@ def research_products(query: str | None = None) -> dict[str, Any]:
         },
         method="POST",
     )
-    with urlopen(request, timeout=90) as response:
+    timeout = int(os.environ.get("OPENAI_REQUEST_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
+    with urlopen(request, timeout=timeout) as response:
         raw = json.loads(response.read().decode("utf-8"))
 
     output_text = extract_output_text(raw)
@@ -101,7 +106,7 @@ def max_candidates() -> int:
 def build_research_prompt(query: str | None) -> str:
     search_query = query or default_query()
     return f"""
-Busca en internet proveedores reales en Mexico para dropshipping o mayoreo de accesorios tecnologicos.
+Busca en internet proveedores reales en Mexico para mayoreo o dropshipping de accesorios tecnologicos.
 Prioriza distribuidores mexicanos, factura, envio nacional, precios visibles o catalogos consultables.
 No inventes datos. Si un costo, stock o envio no esta claro, marca el campo como estimado y explica el riesgo.
 
@@ -132,7 +137,7 @@ Devuelve solamente JSON valido, sin markdown, con esta forma exacta:
   ]
 }}
 
-Limita a {max_candidates()} candidatos. Evita marcas con restricciones fuertes si no hay evidencia clara de autorizacion.
+Limita a {max_candidates()} candidatos. Responde compacto. Evita marcas con restricciones fuertes si no hay evidencia clara de autorizacion.
 """.strip()
 
 

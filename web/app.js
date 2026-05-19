@@ -220,7 +220,7 @@ function renderIntegrations() {
         <h3>OpenAI Web Search</h3>
         <div class="meta">
           <span class="pill ${openai.configured ? "green" : "yellow"}">${openai.configured ? "API key configurada" : "Falta OPENAI_API_KEY"}</span>
-          <span class="pill">${openai.model || "gpt-5"}</span>
+          <span class="pill">${openai.model || "gpt-4.1-mini"}</span>
           <span class="pill">${openai.tool || "web_search"}</span>
         </div>
         <p>Esta integracion usa busqueda web real y devuelve fuentes para validar cada candidato.</p>
@@ -234,7 +234,7 @@ function renderAiResearch() {
   const status = document.querySelector("#aiStatus");
   const openai = state.openai || {};
   status.textContent = openai.configured
-    ? `OpenAI listo. Limite: ${openai.searches_today || 0}/${openai.daily_limit || 3} busquedas hoy, espera minima ${secondsToMinutes(openai.min_interval_seconds || 300)}, maximo ${openai.max_candidates || 4} candidatos.`
+    ? `OpenAI listo con ${openai.model || "gpt-4.1-mini"}. Limite: ${openai.searches_today || 0}/${openai.daily_limit || 3} busquedas hoy, espera minima ${secondsToMinutes(openai.min_interval_seconds || 300)}, maximo ${openai.max_candidates || 4} candidatos.`
     : "Falta configurar OPENAI_API_KEY en Render o en tu .env local.";
   if (!state.aiRuns.length) {
     target.innerHTML = `<article class="row"><div><h3>Sin busquedas reales todavia</h3><p>Ejecuta una busqueda para encontrar proveedores y productos con fuentes.</p></div></article>`;
