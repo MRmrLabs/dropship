@@ -47,9 +47,8 @@ const defaultDiscoveryQuery =
 let busy = false;
 
 async function refresh() {
-  const [suppliers, products, opportunities, drafts, orders, meli, openai, aiRuns] = await Promise.all([
+  const [suppliers, opportunities, drafts, orders, meli, openai, aiRuns] = await Promise.all([
     api("/api/suppliers"),
-    api("/api/products"),
     api("/api/opportunity-list"),
     api("/api/listing-drafts"),
     api("/api/purchase-orders"),
@@ -57,7 +56,7 @@ async function refresh() {
     api("/api/integrations/openai/status"),
     api("/api/ai/research-runs"),
   ]);
-  Object.assign(state, { suppliers, products, opportunities, drafts, orders, meli, openai, aiRuns });
+  Object.assign(state, { suppliers, products: [], opportunities, drafts, orders, meli, openai, aiRuns });
   render();
 }
 
