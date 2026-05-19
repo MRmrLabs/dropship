@@ -30,7 +30,7 @@ El servidor usa solo Python estandar y SQLite. La base se crea en `data/dropship
 Mercado Libre queda preparado como adaptador OAuth/API, pero el MVP no publica automaticamente sin credenciales ni aprobacion.
 Amazon queda como placeholder de fase 2 para SP-API.
 
-La busqueda real de proveedores usa OpenAI Responses API con la herramienta `web_search`. Requiere `OPENAI_API_KEY`; la app guarda cada investigacion y muestra fuentes para validacion manual.
+La busqueda real de proveedores usa OpenAI Responses API con la herramienta `web_search` y salida estructurada JSON Schema. Requiere `OPENAI_API_KEY`; la app guarda cada investigacion y muestra fuentes para validacion manual.
 
 Por seguridad de costos, la busqueda IA tiene limites configurables:
 

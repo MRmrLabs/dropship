@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from app.ai_research import enforce_usage_limits, parse_json_object
+from app.ai_research import enforce_usage_limits, parse_json_object, research_schema
 
 
 class AiResearchTests(unittest.TestCase):
@@ -17,6 +17,11 @@ class AiResearchTests(unittest.TestCase):
     def test_parse_json_object_repairs_trailing_commas(self):
         parsed = parse_json_object('{"summary":"ok","candidates":[{"product_title":"Cable",}],}')
         self.assertEqual(parsed["candidates"][0]["product_title"], "Cable")
+
+    def test_research_schema_requires_candidates(self):
+        schema = research_schema()
+        self.assertIn("candidates", schema["required"])
+        self.assertTrue(schema["additionalProperties"] is False)
 
     @patch.dict("os.environ", {"AI_DAILY_SEARCH_LIMIT": "3"}, clear=False)
     def test_daily_limit_blocks_extra_searches(self):

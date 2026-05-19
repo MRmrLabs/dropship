@@ -40,6 +40,14 @@ def research_products(query: str | None = None) -> dict[str, Any]:
     payload = {
         "model": os.environ.get("OPENAI_WEB_MODEL", DEFAULT_MODEL),
         "max_output_tokens": int(os.environ.get("OPENAI_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)),
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "dropshipping_research",
+                "strict": True,
+                "schema": research_schema(),
+            }
+        },
         "tools": [
             {
                 "type": "web_search",
@@ -103,6 +111,63 @@ def max_candidates() -> int:
     return max(1, min(8, int(os.environ.get("AI_MAX_CANDIDATES", DEFAULT_MAX_CANDIDATES))))
 
 
+def research_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "summary": {"type": "string"},
+            "candidates": {
+                "type": "array",
+                "maxItems": max_candidates(),
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "supplier_name": {"type": "string"},
+                        "supplier_website": {"type": "string"},
+                        "supplier_contact": {"type": "string"},
+                        "product_title": {"type": "string"},
+                        "brand": {"type": "string"},
+                        "category": {"type": "string"},
+                        "estimated_cost_mxn": {"type": "number"},
+                        "estimated_shipping_mxn": {"type": "number"},
+                        "estimated_market_price_mxn": {"type": "number"},
+                        "suggested_sale_price_mxn": {"type": "number"},
+                        "stock_signal": {"type": "string"},
+                        "warranty": {"type": "string"},
+                        "lead_time_days": {"type": "integer"},
+                        "source_urls": {"type": "array", "items": {"type": "string"}},
+                        "risk_flags": {"type": "array", "items": {"type": "string"}},
+                        "confidence": {"type": "number"},
+                        "notes": {"type": "string"},
+                    },
+                    "required": [
+                        "supplier_name",
+                        "supplier_website",
+                        "supplier_contact",
+                        "product_title",
+                        "brand",
+                        "category",
+                        "estimated_cost_mxn",
+                        "estimated_shipping_mxn",
+                        "estimated_market_price_mxn",
+                        "suggested_sale_price_mxn",
+                        "stock_signal",
+                        "warranty",
+                        "lead_time_days",
+                        "source_urls",
+                        "risk_flags",
+                        "confidence",
+                        "notes",
+                    ],
+                },
+            },
+        },
+        "required": ["summary", "candidates"],
+    }
+
+
 def build_research_prompt(query: str | None) -> str:
     search_query = query or default_query()
     return f"""
@@ -136,7 +201,7 @@ Si el costo/stock/envio no esta claro pero el proveedor parece real, marca el ri
 
 Consulta: {search_query}
 
-Devuelve solamente JSON valido, sin markdown, con esta forma exacta:
+Devuelve datos estructurados con esta forma:
 {{
   "summary": "resumen breve",
   "candidates": [
