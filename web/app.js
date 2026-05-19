@@ -83,19 +83,20 @@ function renderMetrics() {
 function renderOpportunities() {
   const target = document.querySelector("#opportunityList");
   if (!state.opportunities.length) {
-    target.innerHTML = `<article class="card"><h3>Sin analisis todavia</h3><p>Presiona Analizar oportunidades para evaluar los productos demo.</p></article>`;
+    target.innerHTML = `<article class="card"><h3>Sin oportunidades reales</h3><p>Busca proveedores con IA, importa candidatos y luego analiza oportunidades.</p></article>`;
     return;
   }
   target.innerHTML = state.opportunities
     .map(
       (item) => `
       <article class="card">
-        <img src="${item.image_url}" alt="${item.title}">
+        ${item.image_url ? `<img src="${item.image_url}" alt="${item.title}">` : ""}
         <h3>${item.title}</h3>
         <div class="meta">
           <span class="pill ${item.signal}">${signalLabel[item.signal]}</span>
           <span class="pill">Score ${item.score}</span>
           <span class="pill">${item.supplier_name}</span>
+          <span class="pill">${item.source_type === "ai" ? "IA real" : "Manual"}</span>
         </div>
         <p class="money">${money(item.suggested_price)}</p>
         <p>Margen neto ${pct(item.net_margin_rate)} · utilidad ${money(item.net_profit)}</p>
@@ -103,7 +104,8 @@ function renderOpportunities() {
         ${renderRisks(item.risks)}
         <div class="actions">
           <button class="primary" onclick="createDraft(${item.product_id})" ${item.signal === "red" ? "disabled" : ""}>Crear borrador</button>
-          <button onclick="createOrder(${item.product_id})">Orden simulada</button>
+          <button onclick="createOrder(${item.product_id})">Crear orden</button>
+          <button onclick="rejectOpportunity(${item.product_id})">Rechazar</button>
         </div>
       </article>
     `
@@ -346,6 +348,14 @@ async function importCandidate(runId, candidateIndex) {
   await api("/api/analyze", { method: "POST" });
   await refresh();
   alert(`Candidato importado como producto ${payload.product_id}. Ya puedes verlo en Oportunidades.`);
+}
+
+async function rejectOpportunity(productId) {
+  await api("/api/opportunities/reject", {
+    method: "POST",
+    body: JSON.stringify({ product_id: productId }),
+  });
+  await refresh();
 }
 
 document.querySelector("#analyzeBtn").addEventListener("click", async () => {

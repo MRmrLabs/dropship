@@ -1,6 +1,6 @@
 # Bot Dropshipping Tech MX
 
-MVP local para evaluar accesorios tecnologicos en Mexico, detectar oportunidades con margen neto minimo de 15%, crear borradores de publicaciones para Mercado Libre y generar ordenes de compra manuales.
+MVP local para evaluar accesorios tecnologicos reales en Mexico, detectar oportunidades con margen neto minimo de 15%, crear borradores de publicaciones para Mercado Libre y generar ordenes de compra manuales.
 
 ## Ejecutar
 
@@ -18,12 +18,12 @@ El servidor usa solo Python estandar y SQLite. La base se crea en `data/dropship
 
 ## Flujo MVP
 
-1. Registrar proveedores mexicanos.
-2. Cargar productos de proveedor.
+1. Buscar proveedores y productos reales con IA web o capturarlos manualmente.
+2. Importar candidatos con fuentes verificables.
 3. Analizar oportunidades con reglas de margen, stock, marca, imagenes y competencia.
 4. Generar borradores de Mercado Libre para oportunidades verdes.
 5. Aprobar borradores antes de publicar.
-6. Simular ventas y generar ordenes de compra para armar pedidos manualmente.
+6. Rechazar oportunidades para sacarlas del tablero.
 
 ## Integraciones
 

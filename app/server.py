@@ -36,6 +36,7 @@ from app.storage import (
     insert_listing_draft,
     insert_purchase_order,
     latest_ai_research_run,
+    reject_product,
     seed_demo_data,
     update_listing_status,
     upsert_opportunity,
@@ -144,6 +145,10 @@ class Handler(BaseHTTPRequestHandler):
             payload = self.read_json()
             product_id = import_ai_candidate(int(payload["run_id"]), int(payload["candidate_index"]))
             self.send_json({"ok": True, "product_id": product_id}, 201)
+        elif path == "/api/opportunities/reject":
+            payload = self.read_json()
+            reject_product(int(payload["product_id"]))
+            self.send_json({"ok": True})
         else:
             raise ApiError(404, "Ruta API no encontrada")
 

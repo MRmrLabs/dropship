@@ -55,7 +55,9 @@ def init_db() -> None:
                 product_url TEXT NOT NULL,
                 assets_authorized INTEGER NOT NULL,
                 market_competition_price REAL NOT NULL,
-                competition_level TEXT NOT NULL
+                competition_level TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                source_type TEXT NOT NULL DEFAULT 'manual'
             );
 
             CREATE TABLE IF NOT EXISTS opportunities (
@@ -114,124 +116,40 @@ def init_db() -> None:
             );
             """
         )
+        ensure_column(conn, "supplier_products", "status", "TEXT NOT NULL DEFAULT 'active'")
+        ensure_column(conn, "supplier_products", "source_type", "TEXT NOT NULL DEFAULT 'manual'")
+
+
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def seed_demo_data() -> None:
+    purge_demo_data()
+
+
+def purge_demo_data() -> None:
+    demo_skus = ("NT-CAB-100", "NT-HUB-441", "GF-IPH-020", "NT-SOP-77")
+    demo_suppliers = ("Distribuidora Norte Tech", "Importadora Gadget Flash")
     with connect() as conn:
-        count = conn.execute("SELECT COUNT(*) AS total FROM suppliers").fetchone()["total"]
-        if count:
-            return
-        suppliers = [
-            (
-                "Distribuidora Norte Tech",
-                "Mexico",
-                "https://proveedor-demo.mx/norte-tech",
-                "ventas@norte-tech.example",
-                "Mayoreo desde 1 pieza, factura disponible",
-                "Paqueteria nacional",
-                86,
-                1,
-                1,
-            ),
-            (
-                "Importadora Gadget Flash",
-                "Mexico",
-                "https://proveedor-demo.mx/gadget-flash",
-                "catalogo@gadget-flash.example",
-                "Catalogo CSV, garantia 30 dias",
-                "Envio proveedor",
-                68,
-                0,
-                1,
-            ),
+        placeholders = ",".join("?" for _ in demo_skus)
+        product_ids = [
+            row["id"]
+            for row in conn.execute(
+                f"SELECT id FROM supplier_products WHERE sku IN ({placeholders})",
+                demo_skus,
+            ).fetchall()
         ]
-        conn.executemany(
-            """
-            INSERT INTO suppliers
-            (name, country, website, contact, terms, shipping_type, reliability, invoices, authorized_assets)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            suppliers,
-        )
-        products = [
-            (
-                1,
-                "NT-CAB-100",
-                "Cable USB-C Nylon 1m Carga Rapida",
-                "Voltix",
-                "cables",
-                79,
-                22,
-                42,
-                "30 dias proveedor",
-                1,
-                "https://images.unsplash.com/photo-1603539444875-76e7684265f6?auto=format&fit=crop&w=900&q=80",
-                "https://proveedor-demo.mx/norte-tech/nt-cab-100",
-                1,
-                189,
-                "medium",
-            ),
-            (
-                1,
-                "NT-HUB-441",
-                "Hub USB-C 4 Puertos Aluminio",
-                "Voltix",
-                "hubs",
-                169,
-                28,
-                18,
-                "30 dias proveedor",
-                2,
-                "https://images.unsplash.com/photo-1625842268584-8f3296236761?auto=format&fit=crop&w=900&q=80",
-                "https://proveedor-demo.mx/norte-tech/nt-hub-441",
-                1,
-                349,
-                "medium",
-            ),
-            (
-                2,
-                "GF-IPH-020",
-                "Cargador Compatible iPhone 20W",
-                "Apple",
-                "cargadores",
-                155,
-                35,
-                9,
-                "Sin garantia extendida",
-                4,
-                "https://images.unsplash.com/photo-1583863788434-e58a36330cf0?auto=format&fit=crop&w=900&q=80",
-                "https://proveedor-demo.mx/gadget-flash/gf-iph-020",
-                1,
-                289,
-                "high",
-            ),
-            (
-                1,
-                "NT-SOP-77",
-                "Soporte Ajustable Para Laptop",
-                "ErgoLine",
-                "soportes",
-                210,
-                45,
-                3,
-                "30 dias proveedor",
-                2,
-                "https://images.unsplash.com/photo-1612010167108-3e6b327405f0?auto=format&fit=crop&w=900&q=80",
-                "https://proveedor-demo.mx/norte-tech/nt-sop-77",
-                1,
-                399,
-                "low",
-            ),
-        ]
-        conn.executemany(
-            """
-            INSERT INTO supplier_products
-            (supplier_id, sku, title, brand, category, cost, supplier_shipping, stock, warranty,
-             lead_time_days, image_url, product_url, assets_authorized, market_competition_price, competition_level)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            products,
-        )
+        if product_ids:
+            id_placeholders = ",".join("?" for _ in product_ids)
+            conn.execute(f"DELETE FROM purchase_orders WHERE product_id IN ({id_placeholders})", product_ids)
+            conn.execute(f"DELETE FROM listing_drafts WHERE product_id IN ({id_placeholders})", product_ids)
+            conn.execute(f"DELETE FROM opportunities WHERE product_id IN ({id_placeholders})", product_ids)
+        conn.execute(f"DELETE FROM supplier_products WHERE sku IN ({placeholders})", demo_skus)
+        placeholders = ",".join("?" for _ in demo_suppliers)
+        conn.execute(f"DELETE FROM suppliers WHERE name IN ({placeholders})", demo_suppliers)
 
 
 def row_to_supplier(row: sqlite3.Row) -> Supplier:
@@ -283,6 +201,7 @@ def fetch_products() -> list[dict[str, Any]]:
             SELECT p.*, s.name AS supplier_name, s.reliability AS supplier_reliability
             FROM supplier_products p
             JOIN suppliers s ON s.id = p.supplier_id
+            WHERE p.status = 'active'
             ORDER BY p.id DESC
             """
         ).fetchall()
@@ -292,7 +211,7 @@ def fetch_products() -> list[dict[str, Any]]:
 def get_product_and_supplier(product_id: int) -> tuple[SupplierProduct, Supplier]:
     with connect() as conn:
         product_row = conn.execute("SELECT * FROM supplier_products WHERE id = ?", (product_id,)).fetchone()
-        if not product_row:
+        if not product_row or product_row["status"] != "active":
             raise KeyError("Producto no encontrado")
         supplier_row = conn.execute("SELECT * FROM suppliers WHERE id = ?", (product_row["supplier_id"],)).fetchone()
         return row_to_product(product_row), row_to_supplier(supplier_row)
@@ -326,10 +245,11 @@ def fetch_opportunities() -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT o.*, p.sku, p.title, p.brand, p.category, p.stock, p.cost, p.supplier_shipping,
-                   p.image_url, p.product_url, s.name AS supplier_name
+                   p.image_url, p.product_url, p.source_type, s.name AS supplier_name
             FROM opportunities o
             JOIN supplier_products p ON p.id = o.product_id
             JOIN suppliers s ON s.id = p.supplier_id
+            WHERE p.status = 'active'
             ORDER BY
               CASE o.signal WHEN 'green' THEN 1 WHEN 'yellow' THEN 2 ELSE 3 END,
               o.score DESC
@@ -503,8 +423,9 @@ def import_ai_candidate(run_id: int, candidate_index: int) -> int:
             """
             INSERT INTO supplier_products
             (supplier_id, sku, title, brand, category, cost, supplier_shipping, stock, warranty,
-             lead_time_days, image_url, product_url, assets_authorized, market_competition_price, competition_level)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             lead_time_days, image_url, product_url, assets_authorized, market_competition_price, competition_level,
+             status, source_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 supplier_id,
@@ -522,9 +443,22 @@ def import_ai_candidate(run_id: int, candidate_index: int) -> int:
                 0,
                 market_price,
                 "medium",
+                "active",
+                "ai",
             ),
         )
         return int(cur.lastrowid)
+
+
+def reject_product(product_id: int) -> None:
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE supplier_products SET status = 'rejected' WHERE id = ?",
+            (product_id,),
+        )
+        if cur.rowcount == 0:
+            raise KeyError("Producto no encontrado")
+        conn.execute("DELETE FROM opportunities WHERE product_id = ?", (product_id,))
 
 
 def ensure_supplier_from_candidate(conn: sqlite3.Connection, candidate: dict[str, Any]) -> int:
