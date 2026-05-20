@@ -47,8 +47,9 @@ const defaultDiscoveryQuery =
 let busy = false;
 
 async function refresh() {
-  const [suppliers, opportunities, drafts, orders, meli, openai, aiRuns] = await Promise.all([
+  const [suppliers, products, opportunities, drafts, orders, meli, openai, aiRuns] = await Promise.all([
     api("/api/suppliers"),
+    api("/api/products"),
     api("/api/opportunity-list"),
     api("/api/listing-drafts"),
     api("/api/purchase-orders"),
@@ -56,7 +57,7 @@ async function refresh() {
     api("/api/integrations/openai/status"),
     api("/api/ai/research-runs"),
   ]);
-  Object.assign(state, { suppliers, products: [], opportunities, drafts, orders, meli, openai, aiRuns });
+  Object.assign(state, { suppliers, products, opportunities, drafts, orders, meli, openai, aiRuns });
   render();
 }
 
@@ -76,6 +77,7 @@ function renderMetrics() {
   const approved = state.drafts.filter((item) => item.status === "approved").length;
   document.querySelector("#metrics").innerHTML = [
     ["Proveedores", state.suppliers.length],
+    ["Productos actuales", state.products.length],
     ["Oportunidades verdes", greens],
     ["Borradores", drafts],
     ["Aprobados", approved],

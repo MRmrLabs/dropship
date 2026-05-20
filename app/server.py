@@ -240,9 +240,8 @@ class Handler(BaseHTTPRequestHandler):
                 imported.append({"product_id": product_id, "status": opportunity.signal.value})
             except Exception as exc:
                 imported.append({"product_id": 0, "status": f"skipped: {exc}"})
-        rejected = reject_red_opportunities()
         self.send_json(
-            {"ok": True, "id": run_id, "result": result, "imported": imported, "auto_rejected": rejected},
+            {"ok": True, "id": run_id, "result": result, "imported": imported, "auto_rejected": 0},
             201,
         )
 
