@@ -249,7 +249,7 @@ def fetch_opportunities() -> list[dict[str, Any]]:
             FROM opportunities o
             JOIN supplier_products p ON p.id = o.product_id
             JOIN suppliers s ON s.id = p.supplier_id
-            WHERE p.status = 'active' AND o.signal IN ('green', 'yellow')
+            WHERE p.status = 'active'
             ORDER BY
               CASE o.signal WHEN 'green' THEN 1 WHEN 'yellow' THEN 2 ELSE 3 END,
               o.score DESC

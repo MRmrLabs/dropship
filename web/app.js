@@ -93,7 +93,6 @@ function renderOpportunities() {
     return;
   }
   target.innerHTML = state.opportunities
-    .filter((item) => item.signal !== "red")
     .map(
       (item) => `
       <article class="card">
