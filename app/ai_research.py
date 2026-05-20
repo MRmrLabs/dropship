@@ -83,7 +83,7 @@ def research_products(query: str | None = None) -> dict[str, Any]:
     parsed = parse_json_object(output_text)
     parsed.setdefault("query", query or default_query())
     parsed.setdefault("candidates", [])
-    parsed["candidates"] = parsed["candidates"][: max_candidates()]
+    parsed["candidates"] = valid_candidates(parsed["candidates"])[: max_candidates()]
     parsed["raw_response_id"] = raw.get("id")
     parsed["sources"] = extract_sources(raw)
     return parsed
@@ -130,16 +130,16 @@ def research_schema() -> dict[str, Any]:
                         "product_title": {"type": "string"},
                         "brand": {"type": "string"},
                         "category": {"type": "string"},
-                        "estimated_cost_mxn": {"type": "number"},
-                        "estimated_shipping_mxn": {"type": "number"},
-                        "estimated_market_price_mxn": {"type": "number"},
-                        "suggested_sale_price_mxn": {"type": "number"},
+                        "estimated_cost_mxn": {"type": "number", "minimum": 20},
+                        "estimated_shipping_mxn": {"type": "number", "minimum": 0},
+                        "estimated_market_price_mxn": {"type": "number", "minimum": 50},
+                        "suggested_sale_price_mxn": {"type": "number", "minimum": 50},
                         "stock_signal": {"type": "string"},
                         "warranty": {"type": "string"},
-                        "lead_time_days": {"type": "integer"},
-                        "source_urls": {"type": "array", "items": {"type": "string"}},
+                        "lead_time_days": {"type": "integer", "minimum": 1, "maximum": 10},
+                        "source_urls": {"type": "array", "minItems": 1, "items": {"type": "string"}},
                         "risk_flags": {"type": "array", "items": {"type": "string"}},
-                        "confidence": {"type": "number"},
+                        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                         "notes": {"type": "string"},
                     },
                     "required": [
@@ -197,6 +197,7 @@ Evita traer candidatos si solo encuentras:
 - proveedor sin forma clara de validar factura/contacto.
 
 No inventes datos. Si no hay al menos una fuente que apoye proveedor + producto, no incluyas el candidato.
+Nunca uses 0, 1, 9.99 ni valores placeholder en precios. Si no puedes confirmar un precio realista de proveedor y un precio realista de mercado, omite ese candidato.
 Si el costo/stock/envio no esta claro pero el proveedor parece real, marca el riesgo y baja la confianza.
 
 Consulta: {search_query}
@@ -231,6 +232,39 @@ Limita a {max_candidates()} candidatos. Responde compacto.
 Ordena primero los mejores candidatos: producto mas especifico, liga de compra mas clara, menor riesgo, margen estimado mas sano.
 Si no encuentras candidatos buenos, devuelve "candidates": [] y explica en summary que no hubo evidencia suficiente.
 """.strip()
+
+
+def valid_candidates(candidates: Any) -> list[dict[str, Any]]:
+    if not isinstance(candidates, list):
+        return []
+    valid: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        cost = as_float(candidate.get("estimated_cost_mxn"))
+        shipping = as_float(candidate.get("estimated_shipping_mxn"))
+        market = as_float(candidate.get("estimated_market_price_mxn"))
+        suggested = as_float(candidate.get("suggested_sale_price_mxn"))
+        urls = candidate.get("source_urls")
+        title = str(candidate.get("product_title") or "").strip()
+        supplier = str(candidate.get("supplier_name") or "").strip()
+        if cost < 20 or market < 50 or suggested < 50:
+            continue
+        if suggested <= cost + shipping:
+            continue
+        if not isinstance(urls, list) or not [url for url in urls if str(url).startswith("http")]:
+            continue
+        if len(title) < 10 or len(supplier) < 3:
+            continue
+        valid.append(candidate)
+    return valid
+
+
+def as_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def default_query() -> str:

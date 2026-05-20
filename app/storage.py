@@ -414,11 +414,7 @@ def import_ai_candidate(run_id: int, candidate_index: int) -> int:
         if existing:
             return int(existing["id"])
         cost = float(candidate.get("estimated_cost_mxn") or 0)
-        market_price = float(
-            candidate.get("suggested_sale_price_mxn")
-            or candidate.get("estimated_market_price_mxn")
-            or 0
-        )
+        market_price = float(candidate.get("estimated_market_price_mxn") or 0)
         if cost <= 0 or market_price <= 0:
             raise ValueError("El candidato no tiene costo o precio estimado suficiente para analizar")
         stock_signal = str(candidate.get("stock_signal") or "desconocido").lower()
@@ -444,7 +440,7 @@ def import_ai_candidate(run_id: int, candidate_index: int) -> int:
                 int(candidate.get("lead_time_days") or 3),
                 "",
                 first_source_url(candidate),
-                0,
+                candidate_assets_authorized(candidate),
                 market_price,
                 "medium",
                 "active",
@@ -471,7 +467,7 @@ def reject_red_opportunities() -> int:
             """
             SELECT product_id
             FROM opportunities
-            WHERE signal = 'red' OR score < 55
+            WHERE signal = 'red' OR score < 45
             """
         ).fetchall()
         product_ids = [row["product_id"] for row in rows]
@@ -502,11 +498,35 @@ def ensure_supplier_from_candidate(conn: sqlite3.Connection, candidate: dict[str
             "Proveedor encontrado por IA; validar precio, stock, factura y autorizacion de imagenes",
             "Validar envio nacional",
             int(float(candidate.get("confidence") or 0.5) * 100),
-            0,
-            0,
+            candidate_has_invoice_evidence(candidate),
+            candidate_assets_authorized(candidate),
         ),
     )
     return int(cur.lastrowid)
+
+
+def candidate_has_invoice_evidence(candidate: dict[str, Any]) -> int:
+    text = candidate_text(candidate)
+    if any(term in text for term in ("sin factura", "factura no", "facturacion no", "sin rfc")):
+        return 0
+    return int("factura" in text or "rfc" in text or bool(candidate.get("supplier_contact")))
+
+
+def candidate_assets_authorized(candidate: dict[str, Any]) -> int:
+    text = candidate_text(candidate)
+    if any(term in text for term in ("imagen sin", "foto sin", "no autoriz", "validar imagen", "validar foto")):
+        return 0
+    return int("imagen autoriz" in text or "foto autoriz" in text or not candidate.get("risk_flags"))
+
+
+def candidate_text(candidate: dict[str, Any]) -> str:
+    fields = [
+        candidate.get("supplier_contact"),
+        candidate.get("warranty"),
+        candidate.get("notes"),
+        " ".join(str(flag) for flag in candidate.get("risk_flags") or []),
+    ]
+    return " ".join(str(field or "") for field in fields).lower()
 
 
 def first_source_url(candidate: dict[str, Any]) -> str:

@@ -173,7 +173,7 @@ def analyze_product(product: SupplierProduct, supplier: Supplier) -> Opportunity
     if financials["net_margin_rate"] < MIN_NET_MARGIN or product.stock <= 0:
         signal = Signal.RED
     elif risks:
-        signal = Signal.YELLOW if score >= 55 else Signal.RED
+        signal = Signal.YELLOW if score >= 45 else Signal.RED
     else:
         signal = Signal.GREEN
 
@@ -226,4 +226,3 @@ def build_purchase_checklist() -> list[str]:
         "Guardar numero de guia y fecha estimada",
         "Actualizar tracking en la venta",
     ]
-
