@@ -37,7 +37,6 @@ from app.storage import (
     insert_purchase_order,
     latest_ai_research_run,
     reject_product,
-    reject_red_opportunities,
     seed_demo_data,
     update_listing_status,
     upsert_opportunity,
@@ -144,8 +143,8 @@ class Handler(BaseHTTPRequestHandler):
             self.create_ai_research(payload)
         elif path == "/api/ai/import-candidate":
             payload = self.read_json()
-            product_id = import_ai_candidate(int(payload["run_id"]), int(payload["candidate_index"]))
-            self.send_json({"ok": True, "product_id": product_id}, 201)
+            imported = self.import_and_analyze_candidate(int(payload["run_id"]), int(payload["candidate_index"]))
+            self.send_json({"ok": True, **imported}, 201)
         elif path == "/api/opportunities/reject":
             payload = self.read_json()
             reject_product(int(payload["product_id"]))
@@ -186,6 +185,7 @@ class Handler(BaseHTTPRequestHandler):
         raise ApiError(404, "Ruta API no encontrada")
 
     def analyze_all(self) -> None:
+        imported = self.import_saved_ai_candidates()
         products = fetch_products()
         created = 0
         for item in products:
@@ -193,8 +193,7 @@ class Handler(BaseHTTPRequestHandler):
             opportunity = analyze_product(product, supplier)
             upsert_opportunity(opportunity)
             created += 1
-        rejected = reject_red_opportunities()
-        self.send_json({"ok": True, "analyzed": created, "auto_rejected": rejected})
+        self.send_json({"ok": True, "imported": imported, "analyzed": created, "auto_rejected": 0})
 
     def create_listing_draft(self, product_id: int) -> None:
         product, supplier = get_product_and_supplier(product_id)
@@ -233,17 +232,31 @@ class Handler(BaseHTTPRequestHandler):
         imported: list[dict[str, int | str]] = []
         for index, candidate in enumerate(result.get("candidates", [])):
             try:
-                product_id = import_ai_candidate(run_id, index)
-                product, supplier = get_product_and_supplier(product_id)
-                opportunity = analyze_product(product, supplier)
-                upsert_opportunity(opportunity)
-                imported.append({"product_id": product_id, "status": opportunity.signal.value})
+                imported.append(self.import_and_analyze_candidate(run_id, index))
             except Exception as exc:
                 imported.append({"product_id": 0, "status": f"skipped: {exc}"})
         self.send_json(
             {"ok": True, "id": run_id, "result": result, "imported": imported, "auto_rejected": 0},
             201,
         )
+
+    def import_saved_ai_candidates(self) -> list[dict[str, int | str]]:
+        imported: list[dict[str, int | str]] = []
+        for run in fetch_ai_research_runs():
+            candidates = run.get("result", {}).get("candidates", [])
+            for index, _candidate in enumerate(candidates):
+                try:
+                    imported.append(self.import_and_analyze_candidate(int(run["id"]), index))
+                except Exception as exc:
+                    imported.append({"product_id": 0, "status": f"skipped: {exc}"})
+        return imported
+
+    def import_and_analyze_candidate(self, run_id: int, candidate_index: int) -> dict[str, int | str]:
+        product_id = import_ai_candidate(run_id, candidate_index)
+        product, supplier = get_product_and_supplier(product_id)
+        opportunity = analyze_product(product, supplier)
+        upsert_opportunity(opportunity)
+        return {"product_id": product_id, "status": opportunity.signal.value}
 
     def read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
