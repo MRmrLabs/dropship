@@ -21,13 +21,13 @@ El servidor usa solo Python estandar y SQLite. La base se crea en `data/dropship
 1. Buscar proveedores y productos reales con IA web o capturarlos manualmente.
 2. Importar automaticamente candidatos con fuentes verificables.
 3. Analizar oportunidades con reglas de margen, stock, marca, imagenes y competencia.
-4. Generar borradores de Mercado Libre para oportunidades verdes.
-5. Aprobar borradores antes de publicar.
+4. Generar borradores de Mercado Libre para oportunidades verdes o amarillas revisables.
+5. Crear la publicacion real en Mercado Libre al presionar Crear borrador, si OAuth y datos del producto son validos.
 6. Rechazar oportunidades para sacarlas del tablero.
 
 ## Integraciones
 
-Mercado Libre queda preparado como adaptador OAuth/API, pero el MVP no publica automaticamente sin credenciales ni aprobacion.
+Mercado Libre usa OAuth/API para crear publicaciones reales desde el boton Crear borrador.
 Amazon queda como placeholder de fase 2 para SP-API.
 
 La busqueda real de proveedores usa OpenAI Responses API con la herramienta `web_search` y salida estructurada JSON Schema. Requiere `OPENAI_API_KEY`; la app guarda cada investigacion y muestra fuentes para validacion manual.
@@ -63,6 +63,18 @@ AI_MAX_CANDIDATES=4
 5. Abre el panel, entra a Integraciones y presiona Conectar.
 
 Los tokens se guardan localmente en `data/meli_tokens.json`, que esta ignorado por Git.
+
+### Publicar en Mercado Libre
+
+El boton **Crear borrador** crea el borrador local y despues intenta crear la publicacion real en Mercado Libre. Si Mercado Libre acepta el item, el panel guarda el `item_id` y muestra **Ver en Mercado Libre**. Si Mercado Libre rechaza por categoria, atributos, imagenes o permisos, el borrador queda en revision y muestra el error exacto para corregirlo.
+
+Variable opcional:
+
+```text
+MELI_LISTING_TYPE_ID=gold_special
+```
+
+Antes de crear borradores u ordenes, el sistema compara el producto contra busqueda publica de Mercado Libre Mexico y recalcula precio de referencia, competencia y margen.
 
 ## Pruebas
 

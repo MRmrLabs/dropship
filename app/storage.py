@@ -85,6 +85,9 @@ def init_db() -> None:
                 attributes TEXT NOT NULL,
                 image_url TEXT NOT NULL,
                 marketplace_item_id TEXT,
+                marketplace_permalink TEXT,
+                marketplace_status TEXT,
+                marketplace_error TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
@@ -118,6 +121,9 @@ def init_db() -> None:
         )
         ensure_column(conn, "supplier_products", "status", "TEXT NOT NULL DEFAULT 'active'")
         ensure_column(conn, "supplier_products", "source_type", "TEXT NOT NULL DEFAULT 'manual'")
+        ensure_column(conn, "listing_drafts", "marketplace_permalink", "TEXT")
+        ensure_column(conn, "listing_drafts", "marketplace_status", "TEXT")
+        ensure_column(conn, "listing_drafts", "marketplace_error", "TEXT")
 
 
 def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -296,6 +302,51 @@ def update_listing_status(draft_id: int, status: str) -> None:
             raise KeyError("Borrador no encontrado")
 
 
+def update_listing_marketplace(
+    draft_id: int,
+    item_id: str | None,
+    permalink: str | None,
+    marketplace_status: str | None,
+    status: str,
+    error: str | None = None,
+) -> None:
+    with connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE listing_drafts
+            SET marketplace_item_id = ?,
+                marketplace_permalink = ?,
+                marketplace_status = ?,
+                marketplace_error = ?,
+                status = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (item_id, permalink, marketplace_status, error, status, draft_id),
+        )
+        if cur.rowcount == 0:
+            raise KeyError("Borrador no encontrado")
+
+
+def get_listing_draft(draft_id: int) -> dict[str, Any]:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT d.*, p.sku, p.title AS product_title, s.name AS supplier_name
+            FROM listing_drafts d
+            JOIN supplier_products p ON p.id = d.product_id
+            JOIN suppliers s ON s.id = p.supplier_id
+            WHERE d.id = ?
+            """,
+            (draft_id,),
+        ).fetchone()
+        if not row:
+            raise KeyError("Borrador no encontrado")
+        item = dict(row)
+        item["attributes"] = json.loads(item["attributes"])
+        return item
+
+
 def fetch_listing_drafts() -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
@@ -313,6 +364,20 @@ def fetch_listing_drafts() -> list[dict[str, Any]]:
             item["attributes"] = json.loads(item["attributes"])
             output.append(item)
         return output
+
+
+def update_product_market_snapshot(product_id: int, reference_price: float, competition_level: str) -> None:
+    with connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE supplier_products
+            SET market_competition_price = ?, competition_level = ?
+            WHERE id = ? AND status = 'active'
+            """,
+            (reference_price, competition_level, product_id),
+        )
+        if cur.rowcount == 0:
+            raise KeyError("Producto no encontrado")
 
 
 def insert_purchase_order(order: dict[str, Any]) -> int:

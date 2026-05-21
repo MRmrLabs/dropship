@@ -20,6 +20,7 @@ from app.domain import (
 )
 from app.ai_research import enforce_usage_limits, openai_status, research_products
 from app.meli_auth import build_authorization_url, exchange_code, fetch_me, integration_status
+from app.meli_marketplace import compare_market, publish_listing
 from app.storage import (
     ROOT,
     fetch_ai_research_runs,
@@ -29,6 +30,7 @@ from app.storage import (
     fetch_purchase_orders,
     fetch_suppliers,
     count_ai_research_runs_today,
+    get_listing_draft,
     get_product_and_supplier,
     import_ai_candidate,
     init_db,
@@ -38,7 +40,9 @@ from app.storage import (
     latest_ai_research_run,
     reject_product,
     seed_demo_data,
+    update_listing_marketplace,
     update_listing_status,
+    update_product_market_snapshot,
     upsert_opportunity,
 )
 
@@ -135,6 +139,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/listing-drafts":
             payload = self.read_json()
             self.create_listing_draft(int(payload["product_id"]))
+        elif path == "/api/products/compare-market":
+            payload = self.read_json()
+            self.compare_product_market(int(payload["product_id"]))
         elif path == "/api/purchase-orders":
             payload = self.read_json()
             self.create_purchase_order(payload)
@@ -196,17 +203,96 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True, "imported": imported, "analyzed": created, "auto_rejected": 0})
 
     def create_listing_draft(self, product_id: int) -> None:
+        self.refresh_market_snapshot(product_id)
         product, supplier = get_product_and_supplier(product_id)
         opportunity = analyze_product(product, supplier)
         opportunity_id = upsert_opportunity(opportunity)
         draft = build_listing_draft(product, opportunity)
         draft_id = insert_listing_draft(draft, opportunity_id)
-        self.send_json({"ok": True, "id": draft_id, "status": draft["status"]}, 201)
+        created = get_listing_draft(draft_id)
+        try:
+            listing = publish_listing(created, product)
+            update_listing_marketplace(
+                draft_id,
+                listing.item_id,
+                listing.permalink,
+                listing.status,
+                ListingStatus.PUBLISHED.value,
+            )
+            self.send_json(
+                {
+                    "ok": True,
+                    "id": draft_id,
+                    "status": ListingStatus.PUBLISHED.value,
+                    "marketplace_item_id": listing.item_id,
+                    "permalink": listing.permalink,
+                },
+                201,
+            )
+        except Exception as exc:
+            update_listing_marketplace(
+                draft_id,
+                None,
+                None,
+                "error",
+                ListingStatus.NEEDS_REVIEW.value,
+                str(exc),
+            )
+            self.send_json(
+                {
+                    "ok": False,
+                    "id": draft_id,
+                    "status": ListingStatus.NEEDS_REVIEW.value,
+                    "error": str(exc),
+                },
+                201,
+            )
+
+    def compare_product_market(self, product_id: int) -> None:
+        snapshot = self.refresh_market_snapshot(product_id)
+        product, supplier = get_product_and_supplier(product_id)
+        opportunity = analyze_product(product, supplier)
+        upsert_opportunity(opportunity)
+        self.send_json(
+            {
+                "ok": True,
+                "market": snapshot,
+                "opportunity": {
+                    "product_id": opportunity.product_id,
+                    "suggested_price": opportunity.suggested_price,
+                    "net_margin_rate": opportunity.net_margin_rate,
+                    "net_profit": opportunity.net_profit,
+                    "score": opportunity.score,
+                    "signal": opportunity.signal.value,
+                    "risks": opportunity.risks,
+                },
+            }
+        )
+
+    def refresh_market_snapshot(self, product_id: int) -> dict[str, object]:
+        product, _supplier = get_product_and_supplier(product_id)
+        snapshot = compare_market(product)
+        update_product_market_snapshot(
+            product_id,
+            float(snapshot["reference_price"]),
+            str(snapshot["competition_level"]),
+        )
+        return snapshot
 
     def create_purchase_order(self, payload: dict) -> None:
         product_id = int(payload["product_id"])
+        market = self.refresh_market_snapshot(product_id)
         product, supplier = get_product_and_supplier(product_id)
         opportunity = analyze_product(product, supplier)
+        upsert_opportunity(opportunity)
+        checklist = build_purchase_checklist()
+        checklist.insert(
+            0,
+            "Comparacion Mercado Libre: "
+            f"referencia ${float(market['reference_price']):.2f}, "
+            f"minimo ${float(market['min_price']):.2f}, "
+            f"{int(market['count'])} resultado(s).",
+        )
         order = {
             "sale_reference": payload.get("sale_reference") or "VENTA-SIMULADA",
             "product_id": product.id,
@@ -218,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
             "supplier_shipping": product.supplier_shipping,
             "expected_margin_rate": opportunity.net_margin_rate,
             "supplier_url": product.product_url,
-            "checklist": build_purchase_checklist(),
+            "checklist": checklist,
             "status": PurchaseOrderStatus.PURCHASE_NEEDED.value,
         }
         order_id = insert_purchase_order(order)

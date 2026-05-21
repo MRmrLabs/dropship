@@ -122,6 +122,7 @@ function renderOpportunityActions(item) {
   return `
     <div class="actions">
       <button class="primary" onclick="createDraft(${item.product_id})">Crear borrador</button>
+      <button onclick="compareMarket(${item.product_id})">Comparar ML</button>
       <button onclick="createOrder(${item.product_id})">Crear orden</button>
       <button onclick="rejectOpportunity(${item.product_id})">Rechazar</button>
     </div>
@@ -149,11 +150,17 @@ function renderDrafts() {
             <span class="pill">${statusLabel[item.status]}</span>
             <span class="pill">${money(item.price)}</span>
             <span class="pill">Stock publicado ${item.stock}</span>
+            ${item.marketplace_item_id ? `<span class="pill green">ML ${item.marketplace_item_id}</span>` : ""}
           </div>
+          ${item.marketplace_error ? `<p class="risk-list">Mercado Libre: ${item.marketplace_error}</p>` : ""}
           <p>${item.description.replace(/\n/g, "<br>")}</p>
         </div>
         <div class="actions">
-          <button class="primary" onclick="setDraftStatus(${item.id}, 'approved')">Aprobar</button>
+          ${
+            item.marketplace_permalink
+              ? `<button class="primary" onclick="openUrl('${item.marketplace_permalink}')">Ver en Mercado Libre</button>`
+              : `<button class="primary" onclick="setDraftStatus(${item.id}, 'approved')">Aprobar</button>`
+          }
           <button onclick="setDraftStatus(${item.id}, 'rejected')">Rechazar</button>
           <button onclick="createOrder(${item.product_id}, ${item.id})">Orden</button>
         </div>
@@ -230,6 +237,7 @@ function renderIntegrations() {
       <div class="actions">
         <button class="primary" onclick="connectMeli()" ${!meli.configured ? "disabled" : ""}>Conectar</button>
         <button onclick="checkMeliMe()" ${!meli.connected ? "disabled" : ""}>Verificar cuenta</button>
+        <button onclick="openMeliListings()" ${!meli.user_id ? "disabled" : ""}>Ver mis publicaciones</button>
       </div>
     </article>
     <article class="row">
@@ -304,11 +312,16 @@ function renderCandidate(runId, candidate, index) {
 }
 
 async function createDraft(productId) {
-  await api("/api/listing-drafts", {
+  const payload = await api("/api/listing-drafts", {
     method: "POST",
     body: JSON.stringify({ product_id: productId }),
   });
   await refresh();
+  if (payload.permalink) {
+    window.open(payload.permalink, "_blank", "noopener");
+  } else if (payload.error) {
+    alert(`Borrador local creado, pero Mercado Libre pidio revision: ${payload.error}`);
+  }
 }
 
 async function setDraftStatus(id, status) {
@@ -320,7 +333,7 @@ async function setDraftStatus(id, status) {
 }
 
 async function createOrder(productId, listingDraftId = null) {
-  await api("/api/purchase-orders", {
+  const payload = await api("/api/purchase-orders", {
     method: "POST",
     body: JSON.stringify({
       product_id: productId,
@@ -329,6 +342,7 @@ async function createOrder(productId, listingDraftId = null) {
     }),
   });
   await refresh();
+  alert(`Orden ${payload.id} creada con comparacion de Mercado Libre actualizada.`);
 }
 
 async function connectMeli() {
@@ -339,6 +353,30 @@ async function connectMeli() {
 async function checkMeliMe() {
   const payload = await api("/api/integrations/meli/me");
   alert(`Mercado Libre conectado: ${payload.nickname || payload.id}`);
+}
+
+function openMeliListings() {
+  const userId = state.meli?.user_id;
+  if (!userId) return;
+  window.open(`https://listado.mercadolibre.com.mx/_CustId_${userId}`, "_blank", "noopener");
+}
+
+function openUrl(url) {
+  window.open(url, "_blank", "noopener");
+}
+
+async function compareMarket(productId) {
+  const payload = await api("/api/products/compare-market", {
+    method: "POST",
+    body: JSON.stringify({ product_id: productId }),
+  });
+  await refresh();
+  const market = payload.market || {};
+  alert(
+    `Mercado comparado: referencia ${money(market.reference_price || 0)}, minimo ${money(
+      market.min_price || 0
+    )}, resultados ${market.count || 0}.`
+  );
 }
 
 async function runAiSearch(query) {
