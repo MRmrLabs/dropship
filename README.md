@@ -38,6 +38,10 @@ Por seguridad de costos, la busqueda IA tiene limites configurables:
 AI_DAILY_SEARCH_LIMIT=3
 AI_MIN_SECONDS_BETWEEN_SEARCHES=300
 AI_MAX_CANDIDATES=4
+ML_COMMISSION_RATE=0.145
+MX_IVA_RATE=0.16
+ESTIMATED_ADS_RATE=0.06
+RETURN_BUFFER_RATE=0.03
 ```
 
 ### Conectar Mercado Libre
@@ -74,7 +78,7 @@ Variable opcional:
 MELI_LISTING_TYPE_ID=gold_special
 ```
 
-Antes de crear borradores u ordenes, el sistema compara el producto contra busqueda publica de Mercado Libre Mexico y recalcula precio de referencia, competencia y margen.
+Antes de crear borradores u ordenes, el sistema compara el producto contra busqueda publica de Mercado Libre Mexico y recalcula precio de referencia, competencia y margen. El margen real estimado incluye costo proveedor, envio, comision ML, IVA, ads estimados y colchon de devoluciones.
 
 ## Pruebas
 

@@ -2,6 +2,7 @@ import unittest
 
 from app.domain import SupplierProduct
 from app.meli_marketplace import build_attributes, remove_price_outliers
+from app.storage import dedupe_opportunity_rows, title_similarity
 
 
 def product(**overrides):
@@ -44,6 +45,42 @@ class MeliMarketplaceTests(unittest.TestCase):
         ]
         cleaned = remove_price_outliers(items)
         self.assertEqual([item["price"] for item in cleaned], [390, 410])
+
+    def test_title_similarity_detects_variants(self):
+        score = title_similarity("Base Soporte Laptop Ajustable 360 Aluminio", "Soporte Laptop 360 Aluminio Premium")
+        self.assertGreater(score, 0.75)
+
+    def test_dedupe_opportunity_rows_keeps_best_match(self):
+        rows = [
+            {
+                "product_id": 1,
+                "sku": "A",
+                "title": "Hub USB C 7 en 1",
+                "image_url": "",
+                "product_url": "https://example.com/a",
+                "score": 50,
+                "net_profit": 40,
+                "suggested_price": 300,
+                "supplier_name": "Uno",
+                "intelligence": {"potential_score": 50},
+            },
+            {
+                "product_id": 2,
+                "sku": "B",
+                "title": "Hub USB-C 7 en 1 Premium",
+                "image_url": "",
+                "product_url": "https://example.com/b",
+                "score": 80,
+                "net_profit": 70,
+                "suggested_price": 320,
+                "supplier_name": "Dos",
+                "intelligence": {"potential_score": 80},
+            },
+        ]
+        deduped = dedupe_opportunity_rows(rows)
+        self.assertEqual(len(deduped), 1)
+        self.assertEqual(deduped[0]["product_id"], 2)
+        self.assertEqual(deduped[0]["duplicate_count"], 2)
 
 
 if __name__ == "__main__":

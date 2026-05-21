@@ -3,12 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from math import ceil
+import os
+import re
 from typing import Any
 
 
 MIN_NET_MARGIN = 0.15
-ML_COMMISSION_RATE = 0.145
-RETURN_BUFFER_RATE = 0.03
+ML_COMMISSION_RATE = float(os.environ.get("ML_COMMISSION_RATE", "0.145"))
+IVA_RATE = float(os.environ.get("MX_IVA_RATE", "0.16"))
+ADS_RATE = float(os.environ.get("ESTIMATED_ADS_RATE", "0.06"))
+RETURN_BUFFER_RATE = float(os.environ.get("RETURN_BUFFER_RATE", "0.03"))
 SAFE_CATEGORIES = {
     "cables",
     "cargadores",
@@ -112,20 +116,25 @@ def money(value: float) -> float:
 def calculate_financials(product: SupplierProduct) -> dict[str, float]:
     target_price = product.market_competition_price * 0.98
     floor_price = (product.cost + product.supplier_shipping) / (
-        1 - ML_COMMISSION_RATE - RETURN_BUFFER_RATE - MIN_NET_MARGIN
+        1 - ML_COMMISSION_RATE - IVA_RATE - ADS_RATE - RETURN_BUFFER_RATE - MIN_NET_MARGIN
     )
     suggested_price = max(target_price, floor_price)
-    suggested_price = ceil(suggested_price / 5) * 5 - 1
+    suggested_price = ceil(suggested_price / 5) * 5
 
-    fees = suggested_price * ML_COMMISSION_RATE
+    marketplace_fee = suggested_price * ML_COMMISSION_RATE
+    iva = suggested_price * IVA_RATE
+    ads = suggested_price * ADS_RATE
     return_buffer = suggested_price * RETURN_BUFFER_RATE
-    total_cost = product.cost + product.supplier_shipping + fees + return_buffer
+    total_cost = product.cost + product.supplier_shipping + marketplace_fee + iva + ads + return_buffer
     net_profit = suggested_price - total_cost
     net_margin_rate = net_profit / suggested_price if suggested_price else 0
 
     return {
         "suggested_price": money(suggested_price),
-        "fees": money(fees),
+        "marketplace_fee": money(marketplace_fee),
+        "fees": money(marketplace_fee),
+        "iva": money(iva),
+        "ads": money(ads),
         "return_buffer": money(return_buffer),
         "total_cost": money(total_cost),
         "net_profit": money(net_profit),
@@ -160,8 +169,8 @@ def analyze_product(product: SupplierProduct, supplier: Supplier) -> Opportunity
         risks.append("Imagenes/textos sin autorizacion confirmada")
         score -= 30
     if product.competition_level.lower() == "high":
-        risks.append("Competencia agresiva")
-        score -= 20
+        risks.append("Producto saturado en Mercado Libre")
+        score -= 25
     if financials["net_margin_rate"] < MIN_NET_MARGIN:
         risks.append("Margen neto menor a 15%")
         score -= 45
@@ -191,14 +200,14 @@ def analyze_product(product: SupplierProduct, supplier: Supplier) -> Opportunity
 
 def build_listing_draft(product: SupplierProduct, opportunity: Opportunity) -> dict[str, Any]:
     status = ListingStatus.DRAFT if opportunity.signal == Signal.GREEN else ListingStatus.NEEDS_REVIEW
-    title = f"{product.title} - Envio rapido Mexico"
+    title = optimize_marketplace_title(product.title, product.brand)
     description = (
         f"{product.title}\n\n"
         f"SKU proveedor: {product.sku}\n"
         f"Categoria: {product.category}\n"
         f"Garantia: {product.warranty}\n"
         "Producto evaluado para venta con proveedor mexicano. "
-        "Confirma compatibilidad antes de aprobar la publicacion."
+        "Confirma compatibilidad, stock y derechos de imagen antes de publicar."
     )
     return {
         "product_id": product.id,
@@ -215,6 +224,105 @@ def build_listing_draft(product: SupplierProduct, opportunity: Opportunity) -> d
         },
         "image_url": product.image_url,
     }
+
+
+def optimize_marketplace_title(title: str, brand: str = "") -> str:
+    cleaned = re.sub(r"\s+", " ", title).strip()
+    cleaned = re.sub(r"\b(al mayoreo|mayoreo|dropshipping|promocion|oferta)\b", "", cleaned, flags=re.I)
+    cleaned = cleaned.replace("  ", " ").strip(" -")
+    if brand and brand.lower() not in {"generico", "genérico"} and brand.lower() not in cleaned.lower():
+        cleaned = f"{cleaned} {brand}"
+    replacements = {
+        "usb c": "USB-C",
+        "tipo c": "Tipo C",
+        "hdmi": "HDMI",
+        "laptop": "Laptop",
+    }
+    for old, new in replacements.items():
+        cleaned = re.sub(old, new, cleaned, flags=re.I)
+    return cleaned[:60].strip()
+
+
+def product_intelligence(product: SupplierProduct, supplier: Supplier, opportunity: Opportunity) -> dict[str, Any]:
+    financials = calculate_financials(product)
+    saturation = "Baja"
+    if product.competition_level.lower() == "high":
+        saturation = "Alta"
+    elif product.competition_level.lower() == "medium":
+        saturation = "Media"
+
+    return_risk = "Bajo"
+    if product.category.lower() in {"cargadores", "perifericos"} or product.brand.lower() in RISKY_BRANDS:
+        return_risk = "Medio"
+    if product.stock < 5 or product.lead_time_days > 5:
+        return_risk = "Alto"
+
+    visual = "Medio"
+    if product.category.lower() in {"soportes", "organizadores tech", "hubs", "fundas", "micas"}:
+        visual = "Alto"
+    if not product.image_url and not product.assets_authorized:
+        visual = "Bajo"
+
+    potential = opportunity.score
+    if financials["net_margin_rate"] >= 0.35:
+        potential += 8
+    if saturation == "Baja":
+        potential += 8
+    if visual == "Alto":
+        potential += 6
+    if return_risk == "Alto":
+        potential -= 12
+    potential = max(0, min(100, potential))
+
+    if potential >= 75 and opportunity.signal == Signal.GREEN:
+        verdict = "Recomendada"
+        verdict_signal = "green"
+    elif potential < 45 or saturation == "Alta":
+        verdict = "Saturada"
+        verdict_signal = "red"
+    else:
+        verdict = "Riesgosa"
+        verdict_signal = "yellow"
+
+    alerts: list[str] = []
+    if saturation == "Alta":
+        alerts.append("Producto muy saturado")
+    if financials["net_margin_rate"] < MIN_NET_MARGIN:
+        alerts.append("Margen insuficiente")
+    if product.lead_time_days > 3:
+        alerts.append("Envio de proveedor lento")
+    if not product.assets_authorized or not supplier.authorized_assets:
+        alerts.append("Imagenes pendientes de validar")
+    if return_risk == "Alto":
+        alerts.append("Riesgo de devolucion alto")
+
+    return {
+        "potential_score": potential,
+        "verdict": verdict,
+        "verdict_signal": verdict_signal,
+        "saturation": saturation,
+        "competition": saturation,
+        "return_risk": return_risk,
+        "visual_potential": visual,
+        "auto_action": auto_action(opportunity, financials, saturation, return_risk),
+        "alerts": alerts,
+        "financials": financials,
+    }
+
+
+def auto_action(
+    opportunity: Opportunity,
+    financials: dict[str, float],
+    saturation: str,
+    return_risk: str,
+) -> str:
+    if opportunity.signal == Signal.RED or financials["net_margin_rate"] < MIN_NET_MARGIN:
+        return "rechazar"
+    if saturation == "Alta" or return_risk == "Alto":
+        return "revision"
+    if financials["net_margin_rate"] >= 0.28 and opportunity.score >= 75:
+        return "aprobar"
+    return "revision"
 
 
 def build_purchase_checklist() -> list[str]:

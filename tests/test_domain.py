@@ -77,7 +77,13 @@ class DomainTests(unittest.TestCase):
         draft = build_listing_draft(product(brand="Apple"), risky)
         self.assertEqual(draft["status"], "needs_review")
 
+    def test_real_margin_includes_iva_ads_and_commission(self):
+        financials = calculate_financials(product())
+        self.assertIn("iva", financials)
+        self.assertIn("ads", financials)
+        self.assertIn("marketplace_fee", financials)
+        self.assertGreater(financials["total_cost"], product().cost + product().supplier_shipping)
+
 
 if __name__ == "__main__":
     unittest.main()
-

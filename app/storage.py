@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from pathlib import Path
+from difflib import SequenceMatcher
 from typing import Any
 
-from app.domain import Supplier, SupplierProduct
+from app.domain import Opportunity, Signal, Supplier, SupplierProduct, product_intelligence
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -251,7 +253,12 @@ def fetch_opportunities() -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT o.*, p.sku, p.title, p.brand, p.category, p.stock, p.cost, p.supplier_shipping,
-                   p.image_url, p.product_url, p.source_type, s.name AS supplier_name
+                   p.warranty, p.lead_time_days, p.image_url, p.product_url, p.assets_authorized,
+                   p.market_competition_price, p.competition_level, p.source_type,
+                   s.id AS supplier_id, s.name AS supplier_name, s.country AS supplier_country,
+                   s.website AS supplier_website, s.contact AS supplier_contact, s.terms AS supplier_terms,
+                   s.shipping_type AS supplier_shipping_type, s.reliability AS supplier_reliability,
+                   s.invoices AS supplier_invoices, s.authorized_assets AS supplier_authorized_assets
             FROM opportunities o
             JOIN supplier_products p ON p.id = o.product_id
             JOIN suppliers s ON s.id = p.supplier_id
@@ -265,8 +272,49 @@ def fetch_opportunities() -> list[dict[str, Any]]:
         for row in rows:
             item = dict(row)
             item["risks"] = json.loads(item["risks"])
+            product = SupplierProduct(
+                id=item["product_id"],
+                supplier_id=item["supplier_id"],
+                sku=item["sku"],
+                title=item["title"],
+                brand=item["brand"],
+                category=item["category"],
+                cost=item["cost"],
+                supplier_shipping=item["supplier_shipping"],
+                stock=item["stock"],
+                warranty=item["warranty"],
+                lead_time_days=item["lead_time_days"],
+                image_url=item["image_url"],
+                product_url=item["product_url"],
+                assets_authorized=bool(item["assets_authorized"]),
+                market_competition_price=item["market_competition_price"],
+                competition_level=item["competition_level"],
+            )
+            supplier = Supplier(
+                id=item["supplier_id"],
+                name=item["supplier_name"],
+                country=item["supplier_country"],
+                website=item["supplier_website"],
+                contact=item["supplier_contact"],
+                terms=item["supplier_terms"],
+                shipping_type=item["supplier_shipping_type"],
+                reliability=item["supplier_reliability"],
+                invoices=bool(item["supplier_invoices"]),
+                authorized_assets=bool(item["supplier_authorized_assets"]),
+            )
+            real_opportunity = Opportunity(
+                product_id=item["product_id"],
+                platform=item["platform"],
+                suggested_price=item["suggested_price"],
+                net_margin_rate=item["net_margin_rate"],
+                net_profit=item["net_profit"],
+                score=item["score"],
+                signal=Signal(item["signal"]),
+                risks=item["risks"],
+            )
+            item["intelligence"] = product_intelligence(product, supplier, real_opportunity)
             output.append(item)
-        return output
+        return dedupe_opportunity_rows(output)
 
 
 def insert_listing_draft(draft: dict[str, Any], opportunity_id: int | None) -> int:
@@ -475,7 +523,7 @@ def import_ai_candidate(run_id: int, candidate_index: int) -> int:
         candidate = candidates[candidate_index]
         supplier_id = ensure_supplier_from_candidate(conn, candidate)
         sku = f"AI-{run_id}-{candidate_index + 1}"
-        existing = conn.execute("SELECT id FROM supplier_products WHERE sku = ?", (sku,)).fetchone()
+        existing = find_duplicate_candidate(conn, sku, candidate)
         if existing:
             return int(existing["id"])
         cost = float(candidate.get("estimated_cost_mxn") or 0)
@@ -513,6 +561,126 @@ def import_ai_candidate(run_id: int, candidate_index: int) -> int:
             ),
         )
         return int(cur.lastrowid)
+
+
+def find_duplicate_candidate(conn: sqlite3.Connection, sku: str, candidate: dict[str, Any]) -> sqlite3.Row | None:
+    exact = conn.execute(
+        "SELECT id FROM supplier_products WHERE sku = ? AND status = 'active'",
+        (sku,),
+    ).fetchone()
+    if exact:
+        return exact
+    title = str(candidate.get("product_title") or "")
+    image = first_source_url(candidate)
+    title_key = normalize_title(title)
+    rows = conn.execute(
+        """
+        SELECT id, title, image_url, product_url, sku
+        FROM supplier_products
+        WHERE status = 'active'
+        ORDER BY id DESC
+        LIMIT 300
+        """
+    ).fetchall()
+    for row in rows:
+        if normalize_title(str(row["title"])) == title_key:
+            return row
+        if title_similarity(str(row["title"]), title) >= 0.88:
+            return row
+        if image and image_similarity(str(row["image_url"] or row["product_url"] or ""), image) >= 0.9:
+            return row
+    return None
+
+
+def dedupe_opportunity_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: list[list[dict[str, Any]]] = []
+    for item in rows:
+        placed = False
+        for group in groups:
+            head = group[0]
+            if is_duplicate_row(head, item):
+                group.append(item)
+                placed = True
+                break
+        if not placed:
+            groups.append([item])
+    output = []
+    for group in groups:
+        best = sorted(
+            group,
+            key=lambda item: (
+                item.get("intelligence", {}).get("potential_score", 0),
+                item.get("score", 0),
+                item.get("net_profit", 0),
+            ),
+            reverse=True,
+        )[0]
+        best["duplicate_count"] = len(group)
+        best["variants"] = [
+            {
+                "product_id": item["product_id"],
+                "title": item["title"],
+                "supplier_name": item["supplier_name"],
+                "suggested_price": item["suggested_price"],
+            }
+            for item in group
+            if item["product_id"] != best["product_id"]
+        ]
+        output.append(best)
+    return output
+
+
+def is_duplicate_row(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    if a.get("sku") and b.get("sku") and a["sku"] == b["sku"]:
+        return True
+    if normalize_title(str(a.get("title") or "")) == normalize_title(str(b.get("title") or "")):
+        return True
+    if title_similarity(str(a.get("title") or ""), str(b.get("title") or "")) >= 0.88:
+        return True
+    return image_similarity(str(a.get("image_url") or a.get("product_url") or ""), str(b.get("image_url") or b.get("product_url") or "")) >= 0.9
+
+
+def normalize_title(title: str) -> str:
+    text = title.lower()
+    text = re.sub(r"[^a-z0-9áéíóúñü ]+", " ", text)
+    stopwords = {
+        "de",
+        "para",
+        "con",
+        "y",
+        "el",
+        "la",
+        "los",
+        "las",
+        "nuevo",
+        "mayoreo",
+        "envio",
+        "mexico",
+        "premium",
+    }
+    tokens = [token for token in text.split() if token not in stopwords]
+    return " ".join(sorted(tokens))
+
+
+def title_similarity(a: str, b: str) -> float:
+    if not a or not b:
+        return 0.0
+    return SequenceMatcher(None, normalize_title(a), normalize_title(b)).ratio()
+
+
+def image_similarity(a: str, b: str) -> float:
+    if not a or not b:
+        return 0.0
+    a_key = image_key(a)
+    b_key = image_key(b)
+    if not a_key or not b_key:
+        return 0.0
+    return SequenceMatcher(None, a_key, b_key).ratio()
+
+
+def image_key(url: str) -> str:
+    clean = url.lower().split("?")[0].rstrip("/")
+    return re.sub(r"[^a-z0-9]+", "", clean.split("/")[-1])
 
 
 def reject_product(product_id: int) -> None:

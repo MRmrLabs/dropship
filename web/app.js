@@ -20,18 +20,10 @@ const api = async (path, options = {}) => {
 };
 
 const secondsToMinutes = (value) => `${Math.ceil(Number(value || 0) / 60)} min`;
+const money = (value) => Number(value || 0).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
+const pct = (value) => `${Math.round(Number(value || 0) * 1000) / 10}%`;
 
-const money = (value) =>
-  Number(value).toLocaleString("es-MX", { style: "currency", currency: "MXN" });
-
-const pct = (value) => `${Math.round(Number(value) * 1000) / 10}%`;
-
-const signalLabel = {
-  green: "Verde",
-  yellow: "Revision",
-  red: "Descartado",
-};
-
+const signalLabel = { green: "Recomendada", yellow: "Riesgosa", red: "Saturada" };
 const statusLabel = {
   draft: "Borrador",
   needs_review: "Requiere revision",
@@ -42,7 +34,7 @@ const statusLabel = {
 };
 
 const defaultDiscoveryQuery =
-  "productos especificos para comprar mayoreo Mexico accesorios tecnologia hub usb c modelo precio proveedor vender mercado libre precio sugerido";
+  "productos ganadores Mercado Libre Mexico accesorios tech margen alto baja saturacion proveedor factura";
 
 let busy = false;
 
@@ -72,15 +64,22 @@ function render() {
 }
 
 function renderMetrics() {
-  const greens = state.opportunities.filter((item) => item.signal === "green").length;
-  const drafts = state.drafts.filter((item) => item.status === "draft").length;
-  const approved = state.drafts.filter((item) => item.status === "approved").length;
+  const recommended = state.opportunities.filter((item) => item.intelligence?.verdict_signal === "green").length;
+  const avgPotential = state.opportunities.length
+    ? Math.round(
+        state.opportunities.reduce((sum, item) => sum + Number(item.intelligence?.potential_score || item.score || 0), 0) /
+          state.opportunities.length
+      )
+    : 0;
+  const avgMargin = state.opportunities.length
+    ? state.opportunities.reduce((sum, item) => sum + Number(item.net_margin_rate || 0), 0) / state.opportunities.length
+    : 0;
+  const published = state.drafts.filter((item) => item.status === "published").length;
   document.querySelector("#metrics").innerHTML = [
-    ["Proveedores", state.suppliers.length],
-    ["Productos actuales", state.products.length],
-    ["Oportunidades verdes", greens],
-    ["Borradores", drafts],
-    ["Aprobados", approved],
+    ["Recomendadas", recommended],
+    ["Potencial medio", `${avgPotential}/100`],
+    ["Margen real medio", pct(avgMargin)],
+    ["Publicadas", published],
   ]
     .map(([label, value]) => `<article class="metric"><strong>${value}</strong><p>${label}</p></article>`)
     .join("");
@@ -89,30 +88,52 @@ function renderMetrics() {
 function renderOpportunities() {
   const target = document.querySelector("#opportunityList");
   if (!state.opportunities.length) {
-    target.innerHTML = `<article class="card"><h3>Sin oportunidades reales</h3><p>Busca proveedores con IA, importa candidatos y luego analiza oportunidades.</p></article>`;
+    target.innerHTML = `<article class="empty-state"><h3>Sin oportunidades reales</h3><p>Ejecuta una busqueda para llenar tu radar con productos concretos, margen y competencia.</p></article>`;
     return;
   }
-  target.innerHTML = state.opportunities
-    .map(
-      (item) => `
-      <article class="card">
-        ${item.image_url ? `<img src="${item.image_url}" alt="${item.title}">` : ""}
-        <h3>${item.title}</h3>
-        <div class="meta">
-          <span class="pill ${item.signal}">${signalLabel[item.signal]}</span>
-          <span class="pill">Score ${item.score}</span>
-          <span class="pill">${item.supplier_name}</span>
-          <span class="pill">${item.source_type === "ai" ? "IA real" : "Manual"}</span>
+  target.innerHTML = state.opportunities.map(renderOpportunityCard).join("");
+}
+
+function renderOpportunityCard(item) {
+  const intel = item.intelligence || {};
+  const financials = intel.financials || {};
+  const decision = intel.verdict_signal || item.signal;
+  return `
+    <article class="opportunity-card ${decision}">
+      <div class="product-media">
+        ${item.image_url ? `<img src="${item.image_url}" alt="${item.title}">` : `<div class="media-placeholder">${initials(item.title)}</div>`}
+      </div>
+      <div class="card-body">
+        <div class="card-topline">
+          <span class="decision ${decision}">${intel.verdict || signalLabel[item.signal]}</span>
+          <span class="score">${intel.potential_score || item.score}/100</span>
         </div>
-        <p class="money">${money(item.suggested_price)}</p>
-        <p>Margen neto ${pct(item.net_margin_rate)} · utilidad ${money(item.net_profit)}</p>
-        <p class="muted">Costo ${money(item.cost)} + envio proveedor ${money(item.supplier_shipping)} · stock ${item.stock}</p>
-        ${renderRisks(item.risks)}
+        <h3>${item.title}</h3>
+        <div class="metric-row">
+          <div><span>Ganancia</span><strong>${money(item.net_profit)}</strong></div>
+          <div><span>Margen real</span><strong>${pct(item.net_margin_rate)}</strong></div>
+          <div><span>Precio sugerido</span><strong>${money(item.suggested_price)}</strong></div>
+        </div>
+        <div class="signal-grid">
+          <span>Saturacion <b>${intel.saturation || "Media"}</b></span>
+          <span>Competencia ML <b>${intel.competition || "Media"}</b></span>
+          <span>Devolucion <b>${intel.return_risk || "Medio"}</b></span>
+          <span>TikTok visual <b>${intel.visual_potential || "Medio"}</b></span>
+        </div>
+        <div class="cost-breakdown">
+          <span>Proveedor ${money(item.cost)}</span>
+          <span>Envio ${money(item.supplier_shipping)}</span>
+          <span>Comision ${money(financials.marketplace_fee || financials.fees)}</span>
+          <span>IVA ${money(financials.iva)}</span>
+          <span>Ads ${money(financials.ads)}</span>
+        </div>
+        ${renderAlerts(item)}
+        ${item.duplicate_count > 1 ? `<p class="dupes">${item.duplicate_count - 1} variante(s) agrupada(s). Mostrando el mejor match.</p>` : ""}
+        <p class="supplier-line">${item.supplier_name} · Stock ${item.stock} · Auto: ${intel.auto_action || "revision"}</p>
         ${renderOpportunityActions(item)}
-      </article>
-    `
-    )
-    .join("");
+      </div>
+    </article>
+  `;
 }
 
 function renderOpportunityActions(item) {
@@ -121,7 +142,7 @@ function renderOpportunityActions(item) {
   }
   return `
     <div class="actions">
-      <button class="primary" onclick="createDraft(${item.product_id})">Crear borrador</button>
+      <button class="primary" onclick="createDraft(${item.product_id})">Crear publicacion</button>
       <button onclick="compareMarket(${item.product_id})">Comparar ML</button>
       <button onclick="createOrder(${item.product_id})">Crear orden</button>
       <button onclick="rejectOpportunity(${item.product_id})">Rechazar</button>
@@ -129,51 +150,58 @@ function renderOpportunityActions(item) {
   `;
 }
 
-function renderRisks(risks) {
-  if (!risks.length) return `<p class="green pill">Sin riesgos bloqueantes</p>`;
-  return `<ul class="risk-list">${risks.map((risk) => `<li>${risk}</li>`).join("")}</ul>`;
+function renderAlerts(item) {
+  const alerts = item.intelligence?.alerts?.length ? item.intelligence.alerts : item.risks || [];
+  if (!alerts.length) return `<p class="positive-note">Sin alertas bloqueantes</p>`;
+  return `<div class="alert-strip">${alerts.slice(0, 3).map((risk) => `<span>${risk}</span>`).join("")}</div>`;
 }
 
 function renderDrafts() {
   const target = document.querySelector("#draftList");
   if (!state.drafts.length) {
-    target.innerHTML = `<article class="row"><div><h3>No hay borradores</h3><p>Genera uno desde una oportunidad verde o amarilla.</p></div></article>`;
+    target.innerHTML = `<article class="empty-state"><h3>No hay publicaciones</h3><p>Crea una publicacion desde una oportunidad recomendada o riesgosa revisable.</p></article>`;
     return;
   }
-  target.innerHTML = state.drafts
-    .map(
-      (item) => `
-      <article class="row">
+  target.innerHTML = state.drafts.map(renderDraftPreview).join("");
+}
+
+function renderDraftPreview(item) {
+  return `
+    <article class="listing-preview">
+      <div class="listing-main">
+        <div class="listing-image">
+          ${item.image_url ? `<img src="${item.image_url}" alt="${item.title}">` : `<div class="media-placeholder">${initials(item.title)}</div>`}
+        </div>
         <div>
           <h3>${item.title}</h3>
           <div class="meta">
             <span class="pill">${statusLabel[item.status]}</span>
             <span class="pill">${money(item.price)}</span>
-            <span class="pill">Stock publicado ${item.stock}</span>
+            <span class="pill">Stock ${item.stock}</span>
             ${item.marketplace_item_id ? `<span class="pill green">ML ${item.marketplace_item_id}</span>` : ""}
           </div>
-          ${item.marketplace_error ? `<p class="risk-list">Mercado Libre: ${item.marketplace_error}</p>` : ""}
-          <p>${item.description.replace(/\n/g, "<br>")}</p>
+          ${item.marketplace_error ? `<p class="ml-error">Mercado Libre: ${item.marketplace_error}</p>` : ""}
+          <p class="listing-copy">${String(item.description || "").replace(/\n/g, "<br>")}</p>
+          <p class="preview-tag">Preview Mercado Libre · ${money(item.price)}</p>
         </div>
-        <div class="actions">
-          ${
-            item.marketplace_permalink
-              ? `<button class="primary" onclick="openUrl('${item.marketplace_permalink}')">Ver en Mercado Libre</button>`
-              : `<button class="primary" onclick="setDraftStatus(${item.id}, 'approved')">Aprobar</button>`
-          }
-          <button onclick="setDraftStatus(${item.id}, 'rejected')">Rechazar</button>
-          <button onclick="createOrder(${item.product_id}, ${item.id})">Orden</button>
-        </div>
-      </article>
-    `
-    )
-    .join("");
+      </div>
+      <div class="actions">
+        ${
+          item.marketplace_permalink
+            ? `<button class="primary" onclick="openUrl('${item.marketplace_permalink}')">Ver en Mercado Libre</button>`
+            : `<button class="primary" onclick="setDraftStatus(${item.id}, 'approved')">Aprobar</button>`
+        }
+        <button onclick="setDraftStatus(${item.id}, 'rejected')">Rechazar</button>
+        <button onclick="createOrder(${item.product_id}, ${item.id})">Orden</button>
+      </div>
+    </article>
+  `;
 }
 
 function renderOrders() {
   const target = document.querySelector("#orderList");
   if (!state.orders.length) {
-    target.innerHTML = `<article class="row"><div><h3>No hay ordenes</h3><p>Simula una venta desde una oportunidad o borrador.</p></div></article>`;
+    target.innerHTML = `<article class="empty-state"><h3>No hay ordenes</h3><p>Genera ordenes solo cuando el margen y la competencia sigan sanos.</p></article>`;
     return;
   }
   target.innerHTML = state.orders
@@ -248,7 +276,7 @@ function renderIntegrations() {
           <span class="pill">${openai.model || "gpt-4.1-mini"}</span>
           <span class="pill">${openai.tool || "web_search"}</span>
         </div>
-        <p>Esta integracion usa busqueda web real y devuelve fuentes para validar cada candidato.</p>
+        <p>Busqueda real con limites de costo y fuentes verificables.</p>
       </div>
     </article>
   `;
@@ -262,12 +290,10 @@ function renderAiResearch() {
     ? `OpenAI listo con ${openai.model || "gpt-4.1-mini"}. Limite: ${openai.searches_today || 0}/${openai.daily_limit || 3} busquedas hoy, espera minima ${secondsToMinutes(openai.min_interval_seconds || 300)}, maximo ${openai.max_candidates || 4} candidatos.`
     : "Falta configurar OPENAI_API_KEY en Render o en tu .env local.";
   if (!state.aiRuns.length) {
-    target.innerHTML = `<article class="row"><div><h3>Sin busquedas reales todavia</h3><p>Ejecuta una busqueda para encontrar proveedores y productos con fuentes.</p></div></article>`;
+    target.innerHTML = `<article class="empty-state"><h3>Sin busquedas reales todavia</h3><p>Ejecuta una busqueda para encontrar proveedores y productos con fuentes.</p></article>`;
     return;
   }
-  target.innerHTML = state.aiRuns
-    .map((run) => renderAiRun(run))
-    .join("");
+  target.innerHTML = state.aiRuns.map((run) => renderAiRun(run)).join("");
 }
 
 function renderAiRun(run) {
@@ -304,9 +330,7 @@ function renderCandidate(runId, candidate, index) {
       <p class="muted">${candidate.notes || "Validar condiciones con proveedor."}</p>
       ${risks.length ? `<ul class="risk-list">${risks.map((risk) => `<li>${risk}</li>`).join("")}</ul>` : ""}
       <p>${urls.map((url) => `<a href="${url}" target="_blank" rel="noreferrer">Fuente</a>`).join(" · ")}</p>
-      <div class="actions">
-        <button onclick="importCandidate(${runId}, ${index})">Reimportar</button>
-      </div>
+      <div class="actions"><button onclick="importCandidate(${runId}, ${index})">Reimportar</button></div>
     </div>
   `;
 }
@@ -372,11 +396,7 @@ async function compareMarket(productId) {
   });
   await refresh();
   const market = payload.market || {};
-  alert(
-    `Mercado comparado: referencia ${money(market.reference_price || 0)}, minimo ${money(
-      market.min_price || 0
-    )}, resultados ${market.count || 0}.`
-  );
+  alert(`Mercado comparado: referencia ${money(market.reference_price)}, minimo ${money(market.min_price)}, resultados ${market.count || 0}.`);
 }
 
 async function runAiSearch(query) {
@@ -426,16 +446,13 @@ async function discoverAndAnalyze() {
   openProgress("Buscando oportunidades reales");
   try {
     await refresh();
-    if (!state.openai?.configured) {
-      throw new Error("Falta configurar OPENAI_API_KEY en Render.");
-    }
+    if (!state.openai?.configured) throw new Error("Falta configurar OPENAI_API_KEY en Render.");
     if ((state.openai.searches_today || 0) >= (state.openai.daily_limit || 3)) {
       throw new Error("Limite diario de busquedas IA alcanzado.");
     }
-
     const query = document.querySelector("#aiQuery")?.value || defaultDiscoveryQuery;
     logProgress(`Llamando IA web con ${state.openai.model || "gpt-4.1-mini"}.`);
-    logProgress("Buscando proveedores reales con fuentes verificables.");
+    logProgress("Buscando productos ganadores con margen, saturacion y fuentes.");
     const research = await api("/api/ai/research", {
       method: "POST",
       body: JSON.stringify({ query }),
@@ -444,25 +461,17 @@ async function discoverAndAnalyze() {
     const imported = research.imported || [];
     logProgress(`IA regreso ${candidates.length} candidato(s).`, "done");
     logProgress(`Importacion automatica: ${imported.length} resultado(s).`, "done");
-
-    if (!candidates.length) {
-      logProgress("No hubo candidatos importables en esta busqueda.", "error");
-      return;
-    }
-
     for (let index = 0; index < candidates.length; index += 1) {
       const candidate = candidates[index];
       const result = imported[index];
       const title = candidate.product_title || `candidato ${index + 1}`;
-      if (result?.product_id) {
-        logProgress(`${title}: importado como producto ${result.product_id} (${result.status}).`, "done");
-      } else {
-        logProgress(`${title}: ${result?.status || "no importado"}.`, "error");
-      }
+      logProgress(
+        result?.product_id ? `${title}: agregado al radar (${result.status}).` : `${title}: ${result?.status || "no importado"}.`,
+        result?.product_id ? "done" : "error"
+      );
     }
     await refresh();
-
-    logProgress("Tablero actualizado. Revisa Oportunidades y rechaza lo que no sirva.", "done");
+    logProgress("Radar actualizado. Revisa recomendaciones y alertas.", "done");
   } catch (error) {
     logProgress(error.message, "error");
   } finally {
@@ -490,17 +499,23 @@ function closeProgress() {
   document.querySelector("#progressModal").classList.add("hidden");
 }
 
+function initials(value) {
+  return String(value || "ML")
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
 document.querySelector("#analyzeBtn").addEventListener("click", async () => {
   await discoverAndAnalyze();
 });
-
 document.querySelector("#progressClose").addEventListener("click", closeProgress);
-
 document.querySelector("#aiSearchForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   await runAiSearch(document.querySelector("#aiQuery").value);
 });
-
 document.querySelectorAll(".tab").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
