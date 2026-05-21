@@ -12,7 +12,10 @@
         <h1>NEOBOT Commerce Copilot</h1>
         <p>Radar de productos rentables para vendedores Mercado Libre</p>
       </div>
-      <button id="analyzeBtn" class="primary">Analizar oportunidades</button>
+      <div class="top-actions">
+        <a class="store-link" href="/tienda" target="_blank" rel="noreferrer">Ver tienda</a>
+        <button id="analyzeBtn" class="primary">Analizar oportunidades</button>
+      </div>
     </header>
 
     <main>
@@ -21,6 +24,7 @@
       <nav class="tabs" aria-label="Secciones">
         <button class="tab active" data-tab="opportunities">Radar</button>
         <button class="tab" data-tab="drafts">Publicaciones</button>
+        <button class="tab" data-tab="webSales">Ventas web</button>
         <button class="tab" data-tab="orders">Ordenes</button>
         <button class="tab" data-tab="suppliers">Proveedores</button>
         <button class="tab" data-tab="aiSearch">Busqueda IA</button>
@@ -49,6 +53,14 @@
           <p>Checklist operativo para que armes pedidos sin compra automatica.</p>
         </div>
         <div id="orderList" class="list"></div>
+      </section>
+
+      <section id="webSales" class="panel">
+        <div class="section-head">
+          <h2>Ventas web</h2>
+          <p>Pedidos capturados desde tu tienda directa.</p>
+        </div>
+        <div id="webSalesList" class="list"></div>
       </section>
 
       <section id="suppliers" class="panel">

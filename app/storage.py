@@ -112,6 +112,20 @@ def init_db() -> None:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS storefront_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_name TEXT NOT NULL,
+                customer_email TEXT NOT NULL,
+                customer_phone TEXT NOT NULL,
+                delivery_city TEXT NOT NULL,
+                delivery_notes TEXT NOT NULL,
+                items_json TEXT NOT NULL,
+                subtotal REAL NOT NULL,
+                status TEXT NOT NULL,
+                purchase_order_ids TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS ai_research_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 query TEXT NOT NULL,
@@ -466,6 +480,80 @@ def fetch_purchase_orders() -> list[dict[str, Any]]:
         return output
 
 
+def fetch_storefront_products() -> list[dict[str, Any]]:
+    products = []
+    for item in fetch_opportunities():
+        if item["signal"] == "red":
+            continue
+        intel = item.get("intelligence", {})
+        if intel.get("verdict_signal") == "red":
+            continue
+        products.append(
+            {
+                "product_id": item["product_id"],
+                "title": item["title"],
+                "brand": item["brand"],
+                "category": item["category"],
+                "price": item["suggested_price"],
+                "stock": min(int(item["stock"]), 10),
+                "image_url": item["image_url"],
+                "supplier_name": item["supplier_name"],
+                "score": intel.get("potential_score", item["score"]),
+                "verdict": intel.get("verdict", "Revisable"),
+                "margin": item["net_margin_rate"],
+                "alerts": intel.get("alerts", []),
+                "description": storefront_description(item),
+            }
+        )
+    return products
+
+
+def storefront_description(item: dict[str, Any]) -> str:
+    category = str(item.get("category") or "producto tech")
+    brand = str(item.get("brand") or "").strip()
+    prefix = f"{brand} " if brand and brand.lower() not in {"generico", "genérico"} else ""
+    return (
+        f"{prefix}{category} seleccionado por NEOBOT por su margen, disponibilidad y potencial de venta. "
+        "Pedido sujeto a confirmacion de stock antes de pago."
+    )
+
+
+def insert_storefront_order(order: dict[str, Any]) -> int:
+    with connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO storefront_orders
+            (customer_name, customer_email, customer_phone, delivery_city, delivery_notes,
+             items_json, subtotal, status, purchase_order_ids)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                order["customer_name"],
+                order["customer_email"],
+                order["customer_phone"],
+                order["delivery_city"],
+                order["delivery_notes"],
+                json.dumps(order["items"], ensure_ascii=True),
+                order["subtotal"],
+                order["status"],
+                json.dumps(order["purchase_order_ids"], ensure_ascii=True),
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def fetch_storefront_orders() -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM storefront_orders ORDER BY created_at DESC").fetchall()
+        output = []
+        for row in rows:
+            item = dict(row)
+            item["items"] = json.loads(item.pop("items_json"))
+            item["purchase_order_ids"] = json.loads(item["purchase_order_ids"])
+            output.append(item)
+        return output
+
+
 def insert_ai_research_run(query: str, status: str, result: dict[str, Any]) -> int:
     with connect() as conn:
         cur = conn.execute(
@@ -642,7 +730,7 @@ def is_duplicate_row(a: dict[str, Any], b: dict[str, Any]) -> bool:
 
 def normalize_title(title: str) -> str:
     text = title.lower()
-    text = re.sub(r"[^a-z0-9áéíóúñü ]+", " ", text)
+    text = re.sub(r"[^a-z0-9 ]+", " ", text)
     stopwords = {
         "de",
         "para",

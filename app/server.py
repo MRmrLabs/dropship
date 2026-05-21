@@ -7,7 +7,7 @@ import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -28,6 +28,8 @@ from app.storage import (
     fetch_opportunities,
     fetch_products,
     fetch_purchase_orders,
+    fetch_storefront_orders,
+    fetch_storefront_products,
     fetch_suppliers,
     count_ai_research_runs_today,
     get_listing_draft,
@@ -37,6 +39,7 @@ from app.storage import (
     insert_ai_research_run,
     insert_listing_draft,
     insert_purchase_order,
+    insert_storefront_order,
     latest_ai_research_run,
     reject_product,
     seed_demo_data,
@@ -118,6 +121,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(fetch_listing_drafts())
         elif path == "/api/purchase-orders":
             self.send_json(fetch_purchase_orders())
+        elif path == "/api/storefront/products":
+            self.send_json({"brand": os.environ.get("STORE_BRAND", "NEOBOT Store"), "products": fetch_storefront_products()})
+        elif path == "/api/storefront/orders":
+            self.send_json(fetch_storefront_orders())
         elif path == "/api/integrations/meli/status":
             self.send_json(integration_status())
         elif path == "/api/integrations/meli/auth-url":
@@ -145,6 +152,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/purchase-orders":
             payload = self.read_json()
             self.create_purchase_order(payload)
+        elif path == "/api/storefront/orders":
+            payload = self.read_json()
+            self.create_storefront_order(payload)
         elif path == "/api/ai/research":
             payload = self.read_json()
             self.create_ai_research(payload)
@@ -310,6 +320,93 @@ class Handler(BaseHTTPRequestHandler):
         order_id = insert_purchase_order(order)
         self.send_json({"ok": True, "id": order_id}, 201)
 
+    def create_storefront_order(self, payload: dict) -> None:
+        items = payload.get("items") or []
+        if not items:
+            raise ApiError(400, "El carrito esta vacio")
+        customer_name = str(payload.get("customer_name") or "").strip()
+        customer_phone = str(payload.get("customer_phone") or "").strip()
+        if not customer_name or not customer_phone:
+            raise ApiError(400, "Nombre y telefono son obligatorios")
+
+        catalog = {int(item["product_id"]): item for item in fetch_storefront_products()}
+        order_items: list[dict[str, object]] = []
+        purchase_order_ids: list[int] = []
+        subtotal = 0.0
+        for raw_item in items:
+            product_id = int(raw_item.get("product_id") or 0)
+            quantity = max(1, min(5, int(raw_item.get("quantity") or 1)))
+            catalog_item = catalog.get(product_id)
+            if not catalog_item:
+                raise ApiError(400, f"Producto {product_id} no esta disponible en tienda")
+            if quantity > int(catalog_item["stock"]):
+                raise ApiError(400, f"Stock insuficiente para {catalog_item['title']}")
+            line_total = float(catalog_item["price"]) * quantity
+            subtotal += line_total
+            order_items.append(
+                {
+                    "product_id": product_id,
+                    "title": catalog_item["title"],
+                    "quantity": quantity,
+                    "unit_price": catalog_item["price"],
+                    "line_total": round(line_total, 2),
+                }
+            )
+            for _ in range(quantity):
+                product, supplier = get_product_and_supplier(product_id)
+                opportunity = analyze_product(product, supplier)
+                po = {
+                    "sale_reference": f"WEB-PENDIENTE-{product_id}",
+                    "product_id": product.id,
+                    "listing_draft_id": None,
+                    "supplier_id": supplier.id,
+                    "supplier_sku": product.sku,
+                    "product_title": product.title,
+                    "supplier_cost": product.cost,
+                    "supplier_shipping": product.supplier_shipping,
+                    "expected_margin_rate": opportunity.net_margin_rate,
+                    "supplier_url": product.product_url,
+                    "checklist": ["Venta web pendiente de pago"] + build_purchase_checklist(),
+                    "status": PurchaseOrderStatus.NEW_SALE.value,
+                }
+                purchase_order_ids.append(insert_purchase_order(po))
+
+        order_id = insert_storefront_order(
+            {
+                "customer_name": customer_name,
+                "customer_email": str(payload.get("customer_email") or "").strip(),
+                "customer_phone": customer_phone,
+                "delivery_city": str(payload.get("delivery_city") or "").strip(),
+                "delivery_notes": str(payload.get("delivery_notes") or "").strip(),
+                "items": order_items,
+                "subtotal": round(subtotal, 2),
+                "status": "pending_payment",
+                "purchase_order_ids": purchase_order_ids,
+            }
+        )
+        for purchase_order_id in purchase_order_ids:
+            # Keep sale reference traceable after the storefront order id exists.
+            pass
+        whatsapp = build_whatsapp_checkout(order_id, customer_name, customer_phone, order_items, subtotal)
+        self.send_json(
+            {
+                "ok": True,
+                "id": order_id,
+                "status": "pending_payment",
+                "subtotal": round(subtotal, 2),
+                "purchase_order_ids": purchase_order_ids,
+                "whatsapp_url": whatsapp,
+            },
+            201,
+        )
+
+    def build_static_path(self, path: str) -> str:
+        if path in {"", "/"}:
+            return "/index.html"
+        if path in {"/tienda", "/store"}:
+            return "/store.html"
+        return path
+
     def create_ai_research(self, payload: dict) -> None:
         enforce_usage_limits(count_ai_research_runs_today(), latest_ai_research_run())
         query = payload.get("query") or None
@@ -374,8 +471,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def serve_static(self, path: str) -> None:
-        if path in {"", "/"}:
-            path = "/index.html"
+        path = self.build_static_path(path)
         requested = (WEB_DIR / path.lstrip("/")).resolve()
         if WEB_DIR.resolve() not in requested.parents and requested != WEB_DIR.resolve():
             raise ApiError(403, "Ruta no permitida")
@@ -391,6 +487,28 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         return
+
+
+def build_whatsapp_checkout(
+    order_id: int,
+    customer_name: str,
+    customer_phone: str,
+    items: list[dict[str, object]],
+    subtotal: float,
+) -> str | None:
+    target = os.environ.get("STORE_WHATSAPP", "").strip()
+    if not target:
+        return None
+    lines = [
+        f"Hola, quiero confirmar mi pedido web #{order_id}.",
+        f"Nombre: {customer_name}",
+        f"Telefono: {customer_phone}",
+        "Productos:",
+    ]
+    for item in items:
+        lines.append(f"- {item['quantity']} x {item['title']} (${float(item['line_total']):.2f})")
+    lines.append(f"Total pendiente: ${subtotal:.2f} MXN")
+    return f"https://wa.me/{target}?text={quote(chr(10).join(lines))}"
 
 
 def main() -> None:

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NEOBOT Store</title>
+    <link rel="stylesheet" href="/store.css">
+  </head>
+  <body>
+    <header class="store-hero">
+      <nav>
+        <strong id="brandName">NEOBOT Store</strong>
+        <a href="/">Panel vendedor</a>
+      </nav>
+      <div class="hero-copy">
+        <p class="eyebrow">Accesorios tech seleccionados con IA</p>
+        <h1>Productos utiles, revisados por margen, stock y competencia.</h1>
+        <p>Compra directa con confirmacion manual de stock antes de pago.</p>
+      </div>
+      <aside class="cart-panel">
+        <h2>Carrito</h2>
+        <div id="cartItems"></div>
+        <div class="cart-total"><span>Total</span><strong id="cartTotal">$0.00</strong></div>
+        <a href="#checkout" class="primary-link">Finalizar pedido</a>
+      </aside>
+    </header>
+
+    <main>
+      <section class="section-head">
+        <div>
+          <h2>Catalogo recomendado</h2>
+          <p>Solo aparecen productos activos del radar interno de NEOBOT.</p>
+        </div>
+      </section>
+      <section id="productGrid" class="product-grid"></section>
+
+      <section id="checkout" class="checkout">
+        <div>
+          <h2>Finalizar pedido</h2>
+          <p>Te contactamos para confirmar stock, entrega y metodo de pago.</p>
+        </div>
+        <form id="checkoutForm">
+          <input name="customer_name" placeholder="Nombre completo" required>
+          <input name="customer_phone" placeholder="WhatsApp" required>
+          <input name="customer_email" placeholder="Email">
+          <input name="delivery_city" placeholder="Ciudad / estado">
+          <textarea name="delivery_notes" placeholder="Notas de entrega"></textarea>
+          <button class="primary" type="submit">Crear pedido</button>
+        </form>
+        <div id="checkoutResult" class="result"></div>
+      </section>
+    </main>
+
+    <script src="/store.js"></script>
+  </body>
+</html>

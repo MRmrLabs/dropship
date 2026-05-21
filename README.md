@@ -42,6 +42,8 @@ ML_COMMISSION_RATE=0.145
 MX_IVA_RATE=0.16
 ESTIMATED_ADS_RATE=0.06
 RETURN_BUFFER_RATE=0.03
+STORE_BRAND=NEOBOT Store
+STORE_WHATSAPP=5215512345678
 ```
 
 ### Conectar Mercado Libre
@@ -79,6 +81,16 @@ MELI_LISTING_TYPE_ID=gold_special
 ```
 
 Antes de crear borradores u ordenes, el sistema compara el producto contra busqueda publica de Mercado Libre Mexico y recalcula precio de referencia, competencia y margen. El margen real estimado incluye costo proveedor, envio, comision ML, IVA, ads estimados y colchon de devoluciones.
+
+## Tienda directa
+
+La tienda publica vive en:
+
+```text
+/tienda
+```
+
+Muestra productos activos del radar, permite agregar al carrito y crea pedidos web en estado `pending_payment`. Si configuras `STORE_WHATSAPP` con tu numero en formato internacional, el checkout genera un link para confirmar el pedido por WhatsApp.
 
 ## Pruebas
 

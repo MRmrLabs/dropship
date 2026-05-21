@@ -4,6 +4,7 @@ const state = {
   opportunities: [],
   drafts: [],
   orders: [],
+  storeOrders: [],
   meli: null,
   openai: null,
   aiRuns: [],
@@ -39,17 +40,18 @@ const defaultDiscoveryQuery =
 let busy = false;
 
 async function refresh() {
-  const [suppliers, products, opportunities, drafts, orders, meli, openai, aiRuns] = await Promise.all([
+  const [suppliers, products, opportunities, drafts, orders, storeOrders, meli, openai, aiRuns] = await Promise.all([
     api("/api/suppliers"),
     api("/api/products"),
     api("/api/opportunity-list"),
     api("/api/listing-drafts"),
     api("/api/purchase-orders"),
+    api("/api/storefront/orders"),
     api("/api/integrations/meli/status"),
     api("/api/integrations/openai/status"),
     api("/api/ai/research-runs"),
   ]);
-  Object.assign(state, { suppliers, products, opportunities, drafts, orders, meli, openai, aiRuns });
+  Object.assign(state, { suppliers, products, opportunities, drafts, orders, storeOrders, meli, openai, aiRuns });
   render();
 }
 
@@ -57,6 +59,7 @@ function render() {
   renderMetrics();
   renderOpportunities();
   renderDrafts();
+  renderStoreOrders();
   renderOrders();
   renderSuppliers();
   renderAiResearch();
@@ -74,12 +77,12 @@ function renderMetrics() {
   const avgMargin = state.opportunities.length
     ? state.opportunities.reduce((sum, item) => sum + Number(item.net_margin_rate || 0), 0) / state.opportunities.length
     : 0;
-  const published = state.drafts.filter((item) => item.status === "published").length;
+  const webSales = state.storeOrders.length;
   document.querySelector("#metrics").innerHTML = [
     ["Recomendadas", recommended],
     ["Potencial medio", `${avgPotential}/100`],
     ["Margen real medio", pct(avgMargin)],
-    ["Publicadas", published],
+    ["Ventas web", webSales],
   ]
     .map(([label, value]) => `<article class="metric"><strong>${value}</strong><p>${label}</p></article>`)
     .join("");
@@ -218,6 +221,33 @@ function renderOrders() {
           <p>Proveedor: <a href="${item.supplier_url}" target="_blank" rel="noreferrer">${item.supplier_url}</a></p>
           <p>Costo: ${money(item.supplier_cost)} · envio proveedor: ${money(item.supplier_shipping)}</p>
           <ul class="checklist">${item.checklist.map((entry) => `<li>${entry}</li>`).join("")}</ul>
+        </div>
+      </article>
+    `
+    )
+    .join("");
+}
+
+function renderStoreOrders() {
+  const target = document.querySelector("#webSalesList");
+  if (!target) return;
+  if (!state.storeOrders.length) {
+    target.innerHTML = `<article class="empty-state"><h3>Aun no hay ventas web</h3><p>Comparte /tienda para empezar a capturar pedidos directos.</p></article>`;
+    return;
+  }
+  target.innerHTML = state.storeOrders
+    .map(
+      (order) => `
+      <article class="row">
+        <div>
+          <h3>Pedido web #${order.id} · ${money(order.subtotal)}</h3>
+          <div class="meta">
+            <span class="pill yellow">${order.status}</span>
+            <span class="pill">${order.customer_name}</span>
+            <span class="pill">${order.customer_phone}</span>
+          </div>
+          <p>${order.delivery_city || "Ciudad pendiente"} · ${order.customer_email || "Sin email"}</p>
+          <ul class="checklist">${order.items.map((item) => `<li>${item.quantity} x ${item.title} · ${money(item.line_total)}</li>`).join("")}</ul>
         </div>
       </article>
     `
