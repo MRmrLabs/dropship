@@ -35,6 +35,10 @@ class AiResearchTests(unittest.TestCase):
                 "estimated_market_price_mxn": 1,
                 "suggested_sale_price_mxn": 1,
                 "source_urls": ["https://example.com/producto"],
+                "supplier_buy_url": "https://example.com/producto",
+                "stock_signal": "alto",
+                "saturation_signal": "baja",
+                "confidence": 0.8,
             },
             {
                 "supplier_name": "Proveedor MX",
@@ -44,9 +48,32 @@ class AiResearchTests(unittest.TestCase):
                 "estimated_market_price_mxn": 299,
                 "suggested_sale_price_mxn": 329,
                 "source_urls": ["https://example.com/soporte"],
+                "supplier_buy_url": "https://example.com/soporte",
+                "stock_signal": "alto",
+                "saturation_signal": "baja",
+                "confidence": 0.8,
             },
         ]
         self.assertEqual(len(valid_candidates(candidates)), 1)
+
+    def test_valid_candidates_rejects_out_of_stock_products(self):
+        candidates = [
+            {
+                "supplier_name": "Proveedor MX",
+                "product_title": "Hub USB C 7 en 1 modelo real",
+                "estimated_cost_mxn": 120,
+                "estimated_shipping_mxn": 40,
+                "estimated_market_price_mxn": 399,
+                "suggested_sale_price_mxn": 449,
+                "source_urls": ["https://example.com/hub"],
+                "supplier_buy_url": "https://example.com/hub",
+                "stock_signal": "bajo",
+                "saturation_signal": "baja",
+                "confidence": 0.9,
+                "notes": "producto agotado temporalmente",
+            }
+        ]
+        self.assertEqual(valid_candidates(candidates), [])
 
     @patch.dict("os.environ", {"AI_DAILY_SEARCH_LIMIT": "3"}, clear=False)
     def test_daily_limit_blocks_extra_searches(self):

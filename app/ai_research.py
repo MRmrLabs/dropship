@@ -13,8 +13,10 @@ DEFAULT_DAILY_LIMIT = 3
 DEFAULT_MIN_INTERVAL_SECONDS = 300
 DEFAULT_MAX_CANDIDATES = 4
 DEFAULT_MODEL = "gpt-4.1-mini"
-DEFAULT_TIMEOUT_SECONDS = 60
+DEFAULT_TIMEOUT_SECONDS = 240
 DEFAULT_MAX_OUTPUT_TOKENS = 2600
+DEFAULT_REQUIRED_CANDIDATES = 4
+DEFAULT_MAX_ATTEMPTS = 5
 
 
 def openai_status() -> dict[str, Any]:
@@ -27,6 +29,8 @@ def openai_status() -> dict[str, Any]:
             os.environ.get("AI_MIN_SECONDS_BETWEEN_SEARCHES", DEFAULT_MIN_INTERVAL_SECONDS)
         ),
         "max_candidates": int(os.environ.get("AI_MAX_CANDIDATES", DEFAULT_MAX_CANDIDATES)),
+        "required_candidates": required_candidates(),
+        "max_attempts": max_attempts(),
         "request_timeout_seconds": int(os.environ.get("OPENAI_REQUEST_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)),
     }
 
@@ -36,7 +40,50 @@ def research_products(query: str | None = None) -> dict[str, Any]:
     if not api_key:
         raise ValueError("Falta configurar OPENAI_API_KEY")
 
-    prompt = build_research_prompt(query)
+    target = required_candidates()
+    attempts = []
+    accepted: list[dict[str, Any]] = []
+    sources: list[dict[str, str]] = []
+    response_ids: list[str] = []
+
+    for attempt in range(1, max_attempts() + 1):
+        missing = target - len(accepted)
+        if missing <= 0:
+            break
+        prompt = build_research_prompt(query, attempt, missing, [item["product_title"] for item in accepted])
+        parsed, raw = request_research(api_key, prompt)
+        candidates = valid_candidates(parsed.get("candidates", []))
+        before = len(accepted)
+        accepted = dedupe_candidates(accepted + candidates)
+        attempts.append(
+            {
+                "attempt": attempt,
+                "requested": missing,
+                "returned": len(parsed.get("candidates", [])),
+                "accepted": len(accepted) - before,
+                "summary": parsed.get("summary", ""),
+            }
+        )
+        response_ids.append(str(raw.get("id") or ""))
+        sources.extend(extract_sources(raw))
+
+    if len(accepted) < target:
+        raise ValueError(
+            f"No junte {target} productos perfectos; solo {len(accepted)} pasaron filtros estrictos. "
+            "Intenta una busqueda mas especifica o sube AI_RESEARCH_MAX_ATTEMPTS/OPENAI_REQUEST_TIMEOUT_SECONDS."
+        )
+
+    return {
+        "query": query or default_query(),
+        "summary": f"Se encontraron {len(accepted[:target])} oportunidades validas tras {len(attempts)} intento(s).",
+        "candidates": accepted[:target],
+        "attempts": attempts,
+        "raw_response_id": ",".join(response_id for response_id in response_ids if response_id),
+        "sources": unique_sources(sources),
+    }
+
+
+def request_research(api_key: str, prompt: str) -> tuple[dict[str, Any], dict[str, Any]]:
     payload = {
         "model": os.environ.get("OPENAI_DEEP_ANALYSIS_MODEL", os.environ.get("OPENAI_WEB_MODEL", DEFAULT_MODEL)),
         "max_output_tokens": int(os.environ.get("OPENAI_DEEP_MAX_OUTPUT_TOKENS", os.environ.get("OPENAI_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS))),
@@ -81,12 +128,8 @@ def research_products(query: str | None = None) -> dict[str, Any]:
 
     output_text = extract_output_text(raw)
     parsed = parse_json_object(output_text)
-    parsed.setdefault("query", query or default_query())
     parsed.setdefault("candidates", [])
-    parsed["candidates"] = valid_candidates(parsed["candidates"])[: max_candidates()]
-    parsed["raw_response_id"] = raw.get("id")
-    parsed["sources"] = extract_sources(raw)
-    return parsed
+    return parsed, raw
 
 
 def enforce_usage_limits(today_count: int, latest_run: dict[str, Any] | None) -> None:
@@ -108,7 +151,15 @@ def enforce_usage_limits(today_count: int, latest_run: dict[str, Any] | None) ->
 
 
 def max_candidates() -> int:
-    return max(1, min(8, int(os.environ.get("AI_MAX_CANDIDATES", DEFAULT_MAX_CANDIDATES))))
+    return max(required_candidates(), min(8, int(os.environ.get("AI_MAX_CANDIDATES", DEFAULT_MAX_CANDIDATES))))
+
+
+def required_candidates() -> int:
+    return max(4, min(8, int(os.environ.get("AI_REQUIRED_CANDIDATES", DEFAULT_REQUIRED_CANDIDATES))))
+
+
+def max_attempts() -> int:
+    return max(1, min(8, int(os.environ.get("AI_RESEARCH_MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS))))
 
 
 def research_schema() -> dict[str, Any]:
@@ -182,13 +233,18 @@ def research_schema() -> dict[str, Any]:
     }
 
 
-def build_research_prompt(query: str | None) -> str:
+def build_research_prompt(query: str | None, attempt: int = 1, missing: int | None = None, exclude_titles: list[str] | None = None) -> str:
     search_query = query or default_query()
+    needed = missing or required_candidates()
+    exclusions = "\n".join(f"- {title}" for title in (exclude_titles or [])) or "- ninguno"
     return f"""
 Actua como comprador experto de e-commerce en Mexico. Busca oportunidades reales, no productos genericos faciles de descartar.
 
 Objetivo: encontrar productos concretos, comprables y revendibles en Mercado Libre Mexico con margen neto mayor a 15%.
 Haz una investigacion profunda por candidato. No premies solo margen: califica si realmente puede venderse.
+Esta es la busqueda interna #{attempt}. Necesito {needed} candidato(s) NUEVOS que pasen filtros estrictos.
+No repitas estos productos ya aceptados:
+{exclusions}
 
 Busca proveedores reales en Mexico para mayoreo, distribucion autorizada o venta B2B.
 Cada candidato debe ser un producto especifico, no una categoria. Ejemplos buenos:
@@ -204,6 +260,7 @@ Prioriza candidatos con evidencia publica de:
 - productos de bajo riesgo: hubs USB-C, soportes, organizadores, accesorios ergonomicos, cables certificados genericos, perifericos sin marca restringida.
 - una URL donde se pueda comprar o solicitar mayoreo.
 - referencias de Mercado Libre para comparar precio, saturacion y vendedores.
+- disponibilidad real: evita agotado, sin stock, consultar disponibilidad, proximamente, preventa, descontinuado.
 
 Evita traer candidatos si solo encuentras:
 - marketplaces retail sin margen claro;
@@ -211,6 +268,7 @@ Evita traer candidatos si solo encuentras:
 - marcas restringidas o sensibles sin autorizacion;
 - productos con precio proveedor casi igual al precio de venta;
 - proveedor sin forma clara de validar factura/contacto.
+- stock bajo, agotado, sin precio, solo cotizacion sin producto claro.
 
 No inventes datos. Si no hay al menos una fuente que apoye proveedor + producto, no incluyas el candidato.
 Nunca uses 0, 1, 9.99 ni valores placeholder en precios. Si no puedes confirmar un precio realista de proveedor y un precio realista de mercado, omite ese candidato.
@@ -262,7 +320,7 @@ Devuelve datos estructurados con esta forma:
 
 Limita a {max_candidates()} candidatos. Responde compacto.
 Ordena primero los mejores candidatos: producto mas especifico, liga de compra mas clara, menor riesgo, margen estimado mas sano.
-Si no encuentras candidatos buenos, devuelve "candidates": [] y explica en summary que no hubo evidencia suficiente.
+Si no encuentras candidatos perfectos y disponibles, devuelve "candidates": [] y explica en summary que no hubo evidencia suficiente. No rellenes con productos flojos.
 """.strip()
 
 
@@ -278,18 +336,90 @@ def valid_candidates(candidates: Any) -> list[dict[str, Any]]:
         market = as_float(candidate.get("estimated_market_price_mxn"))
         suggested = as_float(candidate.get("suggested_sale_price_mxn"))
         urls = candidate.get("source_urls")
+        buy_url = str(candidate.get("supplier_buy_url") or "").strip()
         title = str(candidate.get("product_title") or "").strip()
         supplier = str(candidate.get("supplier_name") or "").strip()
+        stock = str(candidate.get("stock_signal") or "").strip().lower()
+        saturation = str(candidate.get("saturation_signal") or "").strip().lower()
+        confidence = as_float(candidate.get("confidence"))
+        text = candidate_text(candidate)
         if cost < 20 or market < 50 or suggested < 50:
             continue
         if suggested <= cost + shipping:
             continue
         if not isinstance(urls, list) or not [url for url in urls if str(url).startswith("http")]:
             continue
+        if not buy_url.startswith("http"):
+            continue
         if len(title) < 10 or len(supplier) < 3:
+            continue
+        if stock not in {"alto", "medio"}:
+            continue
+        if saturation == "alta":
+            continue
+        if confidence < 0.58:
+            continue
+        if has_bad_availability(text):
             continue
         valid.append(candidate)
     return valid
+
+
+def dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for candidate in candidates:
+        title = normalize_key(str(candidate.get("product_title") or ""))
+        buy_url = str(candidate.get("supplier_buy_url") or "").split("?")[0].rstrip("/")
+        duplicate = False
+        for existing in output:
+            existing_title = normalize_key(str(existing.get("product_title") or ""))
+            existing_url = str(existing.get("supplier_buy_url") or "").split("?")[0].rstrip("/")
+            if title == existing_title or (buy_url and buy_url == existing_url):
+                duplicate = True
+                break
+        if not duplicate:
+            output.append(candidate)
+    return sorted(output, key=candidate_quality_score, reverse=True)
+
+
+def candidate_quality_score(candidate: dict[str, Any]) -> float:
+    margin = (as_float(candidate.get("suggested_sale_price_mxn")) - as_float(candidate.get("estimated_cost_mxn")) - as_float(candidate.get("estimated_shipping_mxn"))) / max(as_float(candidate.get("suggested_sale_price_mxn")), 1)
+    score = as_float(candidate.get("confidence")) * 100 + margin * 80
+    if str(candidate.get("stock_signal") or "").lower() == "alto":
+        score += 10
+    if str(candidate.get("saturation_signal") or "").lower() == "baja":
+        score += 10
+    return score
+
+
+def normalize_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def candidate_text(candidate: dict[str, Any]) -> str:
+    parts = [
+        candidate.get("product_title"),
+        candidate.get("stock_signal"),
+        candidate.get("notes"),
+        candidate.get("investment_plan"),
+        " ".join(str(flag) for flag in candidate.get("risk_flags") or []),
+    ]
+    return " ".join(str(part or "") for part in parts).lower()
+
+
+def has_bad_availability(text: str) -> bool:
+    blocked = (
+        "agotado",
+        "sin stock",
+        "no disponible",
+        "descontinuado",
+        "preventa",
+        "proximamente",
+        "próximamente",
+        "consultar disponibilidad",
+        "stock bajo",
+    )
+    return any(term in text for term in blocked)
 
 
 def as_float(value: Any) -> float:
@@ -356,3 +486,15 @@ def extract_sources(raw: dict[str, Any]) -> list[dict[str, str]]:
             seen.add(url)
             sources.append({"url": url, "title": source.get("title", url)})
     return sources
+
+
+def unique_sources(sources: list[dict[str, str]]) -> list[dict[str, str]]:
+    output: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for source in sources:
+        url = source.get("url")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        output.append(source)
+    return output

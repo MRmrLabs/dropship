@@ -350,7 +350,7 @@ function renderAiResearch() {
   const status = document.querySelector("#aiStatus");
   const openai = state.openai || {};
   status.textContent = openai.configured
-    ? `OpenAI listo con ${openai.model || "gpt-4.1-mini"}. Limite: ${openai.searches_today || 0}/${openai.daily_limit || 3} busquedas hoy, espera minima ${secondsToMinutes(openai.min_interval_seconds || 300)}, maximo ${openai.max_candidates || 4} candidatos.`
+    ? `OpenAI listo con ${openai.model || "gpt-4.1-mini"}. Objetivo: ${openai.required_candidates || 4} productos perfectos, hasta ${openai.max_attempts || 5} intento(s), timeout ${secondsToMinutes(openai.request_timeout_seconds || 240)} por intento.`
     : "Falta configurar OPENAI_API_KEY en Render o en tu .env local.";
   if (!state.aiRuns.length) {
     target.innerHTML = `<article class="empty-state"><h3>Sin busquedas reales todavia</h3><p>Ejecuta una busqueda para encontrar proveedores y productos con fuentes.</p></article>`;
@@ -557,7 +557,9 @@ async function discoverAndAnalyze() {
     }
     const query = document.querySelector("#aiQuery")?.value || defaultDiscoveryQuery;
     logProgress(`Llamando IA web con ${state.openai.model || "gpt-4.1-mini"}.`);
-    logProgress("Buscando productos ganadores con margen, saturacion y fuentes.");
+    logProgress(`Objetivo obligatorio: ${state.openai.required_candidates || 4} productos disponibles y con evidencia.`);
+    logProgress(`Puede tardar varios minutos: hasta ${state.openai.max_attempts || 5} busquedas internas.`);
+    logProgress("Filtrando agotados, saturados, duplicados y candidatos sin link directo de compra.");
     const research = await api("/api/ai/research", {
       method: "POST",
       body: JSON.stringify({ query }),
