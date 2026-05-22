@@ -123,6 +123,10 @@ def init_db() -> None:
                 subtotal REAL NOT NULL,
                 status TEXT NOT NULL,
                 purchase_order_ids TEXT NOT NULL,
+                stripe_session_id TEXT,
+                stripe_checkout_url TEXT,
+                stripe_payment_status TEXT,
+                platform_fee REAL NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -133,6 +137,16 @@ def init_db() -> None:
                 result_json TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS investment_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL REFERENCES supplier_products(id) ON DELETE CASCADE,
+                opportunity_id INTEGER REFERENCES opportunities(id) ON DELETE SET NULL,
+                plan_json TEXT NOT NULL,
+                html TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         ensure_column(conn, "supplier_products", "status", "TEXT NOT NULL DEFAULT 'active'")
@@ -140,6 +154,10 @@ def init_db() -> None:
         ensure_column(conn, "listing_drafts", "marketplace_permalink", "TEXT")
         ensure_column(conn, "listing_drafts", "marketplace_status", "TEXT")
         ensure_column(conn, "listing_drafts", "marketplace_error", "TEXT")
+        ensure_column(conn, "storefront_orders", "stripe_session_id", "TEXT")
+        ensure_column(conn, "storefront_orders", "stripe_checkout_url", "TEXT")
+        ensure_column(conn, "storefront_orders", "stripe_payment_status", "TEXT")
+        ensure_column(conn, "storefront_orders", "platform_fee", "REAL NOT NULL DEFAULT 0")
 
 
 def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -524,8 +542,8 @@ def insert_storefront_order(order: dict[str, Any]) -> int:
             """
             INSERT INTO storefront_orders
             (customer_name, customer_email, customer_phone, delivery_city, delivery_notes,
-             items_json, subtotal, status, purchase_order_ids)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             items_json, subtotal, status, purchase_order_ids, platform_fee)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 order["customer_name"],
@@ -537,9 +555,42 @@ def insert_storefront_order(order: dict[str, Any]) -> int:
                 order["subtotal"],
                 order["status"],
                 json.dumps(order["purchase_order_ids"], ensure_ascii=True),
+                float(order.get("platform_fee") or 0),
             ),
         )
         return int(cur.lastrowid)
+
+
+def update_storefront_order_stripe(order_id: int, session: dict[str, Any]) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE storefront_orders
+            SET stripe_session_id = ?,
+                stripe_checkout_url = ?,
+                stripe_payment_status = ?
+            WHERE id = ?
+            """,
+            (
+                session.get("id"),
+                session.get("url"),
+                session.get("payment_status") or session.get("status") or "created",
+                order_id,
+            ),
+        )
+
+
+def mark_storefront_order_paid(order_id: int, payment_status: str = "paid") -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE storefront_orders
+            SET status = 'paid',
+                stripe_payment_status = ?
+            WHERE id = ?
+            """,
+            (payment_status, order_id),
+        )
 
 
 def fetch_storefront_orders() -> list[dict[str, Any]]:
@@ -552,6 +603,42 @@ def fetch_storefront_orders() -> list[dict[str, Any]]:
             item["purchase_order_ids"] = json.loads(item["purchase_order_ids"])
             output.append(item)
         return output
+
+
+def upsert_investment_plan(product_id: int, opportunity_id: int | None, plan: dict[str, Any], html: str) -> int:
+    with connect() as conn:
+        existing = conn.execute("SELECT id FROM investment_plans WHERE product_id = ?", (product_id,)).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE investment_plans
+                SET opportunity_id = ?, plan_json = ?, html = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE product_id = ?
+                """,
+                (opportunity_id, json.dumps(plan, ensure_ascii=True), html, product_id),
+            )
+            return int(existing["id"])
+        cur = conn.execute(
+            """
+            INSERT INTO investment_plans (product_id, opportunity_id, plan_json, html)
+            VALUES (?, ?, ?, ?)
+            """,
+            (product_id, opportunity_id, json.dumps(plan, ensure_ascii=True), html),
+        )
+        return int(cur.lastrowid)
+
+
+def get_investment_plan(product_id: int) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM investment_plans WHERE product_id = ? ORDER BY updated_at DESC LIMIT 1",
+            (product_id,),
+        ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["plan"] = json.loads(item.pop("plan_json"))
+        return item
 
 
 def insert_ai_research_run(query: str, status: str, result: dict[str, Any]) -> int:
@@ -851,6 +938,9 @@ def candidate_text(candidate: dict[str, Any]) -> str:
 
 
 def first_source_url(candidate: dict[str, Any]) -> str:
+    buy_url = str(candidate.get("supplier_buy_url") or "").strip()
+    if buy_url.startswith("http"):
+        return buy_url
     urls = candidate.get("source_urls") or []
     if isinstance(urls, list) and urls:
         return str(urls[0])

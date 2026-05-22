@@ -1,6 +1,6 @@
 # Bot Dropshipping Tech MX
 
-MVP local para evaluar accesorios tecnologicos reales en Mexico, detectar oportunidades con margen neto minimo de 15%, crear borradores de publicaciones para Mercado Libre y generar ordenes de compra manuales.
+MVP local para evaluar accesorios tecnologicos reales en Mexico, detectar oportunidades con margen neto minimo de 15%, crear publicaciones para Mercado Libre, generar planes de inversion y preparar ventas directas con Stripe.
 
 ## Ejecutar
 
@@ -23,7 +23,9 @@ El servidor usa solo Python estandar y SQLite. La base se crea en `data/dropship
 3. Analizar oportunidades con reglas de margen, stock, marca, imagenes y competencia.
 4. Generar borradores de Mercado Libre para oportunidades verdes o amarillas revisables.
 5. Crear la publicacion real en Mercado Libre al presionar Crear borrador, si OAuth y datos del producto son validos.
-6. Rechazar oportunidades para sacarlas del tablero.
+6. Ver el plan de inversion: costo proveedor, precio ML, ROI, pasos y PDF.
+7. Cobrar pedidos directos con Stripe si las variables estan configuradas.
+8. Rechazar oportunidades para sacarlas del tablero.
 
 ## Integraciones
 
@@ -44,6 +46,10 @@ ESTIMATED_ADS_RATE=0.06
 RETURN_BUFFER_RATE=0.03
 STORE_BRAND=NEOBOT Store
 STORE_WHATSAPP=5215512345678
+ADMIN_PASSWORD=cambia_esto
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_PLATFORM_COMMISSION_RATE=0.10
 ```
 
 ### Conectar Mercado Libre
@@ -59,10 +65,12 @@ MELI_REDIRECT_URI=http://127.0.0.1:8787/auth/meli/callback
 OPENAI_API_KEY=tu_openai_api_key
 OPENAI_WEB_MODEL=gpt-4.1-mini
 OPENAI_REQUEST_TIMEOUT_SECONDS=60
-OPENAI_MAX_OUTPUT_TOKENS=1600
+OPENAI_MAX_OUTPUT_TOKENS=2600
 AI_DAILY_SEARCH_LIMIT=3
 AI_MIN_SECONDS_BETWEEN_SEARCHES=300
 AI_MAX_CANDIDATES=4
+ADMIN_PASSWORD=cambia_esto
+ADMIN_SESSION_SECRET=cambia_esto_tambien
 ```
 
 4. En Mercado Libre Developers, configura exactamente la misma Redirect URI.
@@ -90,7 +98,25 @@ La tienda publica vive en:
 /tienda
 ```
 
-Muestra productos activos del radar, permite agregar al carrito y crea pedidos web en estado `pending_payment`. Si configuras `STORE_WHATSAPP` con tu numero en formato internacional, el checkout genera un link para confirmar el pedido por WhatsApp.
+Muestra productos activos del radar, permite agregar al carrito y crea pedidos web en estado `pending_payment`. Si configuras `STRIPE_SECRET_KEY`, el checkout crea una sesion real de Stripe y redirige al pago. Si no hay Stripe, usa WhatsApp como fallback cuando `STORE_WHATSAPP` esta configurado.
+
+## Seguridad interna
+
+Configura `ADMIN_PASSWORD` para proteger el panel interno. La tienda publica `/tienda`, el catalogo publico y el checkout quedan accesibles; costos de proveedor, ordenes, planes de inversion, publicaciones ML e integraciones quedan detras del login.
+
+## Stripe Connect
+
+Variables principales:
+
+```text
+STRIPE_SECRET_KEY=sk_live_o_sk_test
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_CONNECTED_ACCOUNT_ID=acct_... # opcional para Connect
+STRIPE_PLATFORM_COMMISSION_RATE=0.10
+PUBLIC_BASE_URL=https://tu-servicio.onrender.com
+```
+
+Si `STRIPE_CONNECTED_ACCOUNT_ID` existe, NEOBOT prepara el cobro con transferencia a la cuenta conectada y comision de plataforma. Si no existe, cobra con Checkout normal en tu cuenta.
 
 ## Pruebas
 
@@ -113,10 +139,19 @@ MELI_REDIRECT_URI=https://tu-servicio.onrender.com/auth/meli/callback
 OPENAI_API_KEY=tu_openai_api_key
 OPENAI_WEB_MODEL=gpt-4.1-mini
 OPENAI_REQUEST_TIMEOUT_SECONDS=60
-OPENAI_MAX_OUTPUT_TOKENS=1600
+OPENAI_MAX_OUTPUT_TOKENS=2600
+OPENAI_DEEP_ANALYSIS_MODEL=gpt-4.1-mini
+OPENAI_DEEP_MAX_OUTPUT_TOKENS=2600
 AI_DAILY_SEARCH_LIMIT=3
 AI_MIN_SECONDS_BETWEEN_SEARCHES=300
 AI_MAX_CANDIDATES=4
+ADMIN_PASSWORD=cambia_esto
+ADMIN_SESSION_SECRET=cambia_esto_tambien
+PUBLIC_BASE_URL=https://tu-servicio.onrender.com
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_CONNECTED_ACCOUNT_ID=
+STRIPE_PLATFORM_COMMISSION_RATE=0.10
 ```
 
 En Mercado Libre Developers, registra exactamente el mismo `MELI_REDIRECT_URI`.

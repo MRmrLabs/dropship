@@ -106,6 +106,14 @@ document.querySelector("#checkoutForm").addEventListener("submit", async (event)
   state.cart = [];
   saveCart();
   renderCart();
+  if (result.checkout_url) {
+    document.querySelector("#checkoutResult").innerHTML = `Pedido #${result.id} creado. Redirigiendo a pago seguro...`;
+    window.location.href = result.checkout_url;
+    return;
+  }
+  if (result.stripe_error) {
+    console.warn("Stripe checkout fallback:", result.stripe_error);
+  }
   document.querySelector("#checkoutResult").innerHTML = result.whatsapp_url
     ? `Pedido #${result.id} creado. <a href="${result.whatsapp_url}" target="_blank" rel="noreferrer">Confirmar por WhatsApp</a>`
     : `Pedido #${result.id} creado. Te contactaremos para confirmar stock y pago.`;

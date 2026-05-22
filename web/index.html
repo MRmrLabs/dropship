@@ -7,6 +7,17 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
+    <div id="loginGate" class="login-gate hidden">
+      <form id="loginForm" class="login-card">
+        <span class="login-badge">NEOBOT interno</span>
+        <h1>Acceso privado</h1>
+        <p>Protege costos de proveedor, planes de inversion y acciones reales.</p>
+        <input id="adminPassword" type="password" placeholder="ADMIN_PASSWORD" autocomplete="current-password">
+        <button class="primary" type="submit">Entrar al panel</button>
+        <p id="loginError" class="login-error"></p>
+      </form>
+    </div>
+
     <header class="topbar">
       <div>
         <h1>NEOBOT Commerce Copilot</h1>
@@ -105,6 +116,19 @@
           <span></span>
         </div>
         <ol id="progressLog" class="progress-log"></ol>
+      </div>
+    </div>
+
+    <div id="planModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="planTitle">
+      <div class="modal-box wide">
+        <div class="modal-head">
+          <h2 id="planTitle">Plan de inversion</h2>
+          <div class="actions compact">
+            <button id="planPdfBtn" type="button">PDF</button>
+            <button id="planClose" type="button">Cerrar</button>
+          </div>
+        </div>
+        <div id="planContent" class="plan-content"></div>
       </div>
     </div>
 

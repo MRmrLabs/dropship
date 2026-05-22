@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.auth import auth_status, is_auth_enabled, is_authenticated, login_cookie, logout_cookie, verify_password
 from app.domain import (
     ListingStatus,
     PurchaseOrderStatus,
@@ -21,6 +22,7 @@ from app.domain import (
 from app.ai_research import enforce_usage_limits, openai_status, research_products
 from app.meli_auth import build_authorization_url, exchange_code, fetch_me, integration_status
 from app.meli_marketplace import compare_market, publish_listing
+from app.reports import build_investment_plan, plan_to_html, plan_to_pdf_bytes
 from app.storage import (
     ROOT,
     fetch_ai_research_runs,
@@ -33,6 +35,7 @@ from app.storage import (
     fetch_suppliers,
     count_ai_research_runs_today,
     get_listing_draft,
+    get_investment_plan,
     get_product_and_supplier,
     import_ai_candidate,
     init_db,
@@ -41,13 +44,18 @@ from app.storage import (
     insert_purchase_order,
     insert_storefront_order,
     latest_ai_research_run,
+    mark_storefront_order_paid,
     reject_product,
     seed_demo_data,
+    update_storefront_order_stripe,
     update_listing_marketplace,
     update_listing_status,
     update_product_market_snapshot,
+    upsert_investment_plan,
     upsert_opportunity,
 )
+from app.stripe_payments import create_checkout_session, parse_webhook, stripe_status
+from app.supplier_orders import supplier_order_route
 
 
 WEB_DIR = ROOT / "web"
@@ -111,6 +119,12 @@ class Handler(BaseHTTPRequestHandler):
     def handle_api_get(self, path: str) -> None:
         if path == "/api/health":
             self.send_json({"ok": True, "marketplace": "mercado_libre_mx"})
+        elif path == "/api/auth/status":
+            status = auth_status()
+            status["authenticated"] = is_authenticated(self.headers.get("Cookie"))
+            self.send_json(status)
+        elif path.startswith("/api/") and not self.require_admin(path):
+            return
         elif path == "/api/suppliers":
             self.send_json(fetch_suppliers())
         elif path == "/api/products":
@@ -135,13 +149,34 @@ class Handler(BaseHTTPRequestHandler):
             status = openai_status()
             status["searches_today"] = count_ai_research_runs_today()
             self.send_json(status)
+        elif path == "/api/integrations/stripe/status":
+            self.send_json(stripe_status())
         elif path == "/api/ai/research-runs":
             self.send_json(fetch_ai_research_runs())
+        elif path.startswith("/api/investment-plans/"):
+            product_id = int(path.rsplit("/", 1)[1].replace(".pdf", ""))
+            self.send_investment_plan(product_id, pdf=path.endswith(".pdf"))
+        elif path.startswith("/api/supplier-order-route/"):
+            product_id = int(path.rsplit("/", 1)[1])
+            product, supplier = get_product_and_supplier(product_id)
+            self.send_json(supplier_order_route(product, supplier))
         else:
             raise ApiError(404, "Ruta API no encontrada")
 
     def handle_api_post(self, path: str) -> None:
-        if path == "/api/analyze":
+        if path == "/api/auth/login":
+            payload = self.read_json()
+            if verify_password(str(payload.get("password") or "")):
+                self.send_json({"ok": True}, headers={"Set-Cookie": login_cookie()})
+            else:
+                raise ApiError(401, "Password incorrecto")
+        elif path == "/api/auth/logout":
+            self.send_json({"ok": True}, headers={"Set-Cookie": logout_cookie()})
+        elif path == "/api/stripe/webhook":
+            self.handle_stripe_webhook()
+        elif path.startswith("/api/") and not self.require_admin(path):
+            return
+        elif path == "/api/analyze":
             self.analyze_all()
         elif path == "/api/listing-drafts":
             payload = self.read_json()
@@ -155,6 +190,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/storefront/orders":
             payload = self.read_json()
             self.create_storefront_order(payload)
+        elif path.startswith("/api/storefront/orders/") and path.endswith("/checkout"):
+            order_id = int(path.split("/")[-2])
+            self.create_stripe_checkout(order_id)
         elif path == "/api/ai/research":
             payload = self.read_json()
             self.create_ai_research(payload)
@@ -188,6 +226,8 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def handle_api_patch(self, path: str) -> None:
+        if path.startswith("/api/") and not self.require_admin(path):
+            return
         parts = path.strip("/").split("/")
         if len(parts) == 4 and parts[:2] == ["api", "listing-drafts"] and parts[3] == "status":
             draft_id = int(parts[2])
@@ -200,6 +240,22 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True})
             return
         raise ApiError(404, "Ruta API no encontrada")
+
+    def require_admin(self, path: str) -> bool:
+        public = {
+            "/api/health",
+            "/api/auth/status",
+            "/api/auth/login",
+            "/api/storefront/products",
+            "/api/storefront/orders",
+            "/api/stripe/webhook",
+        }
+        if path in public or path.startswith("/api/storefront/orders/"):
+            return True
+        if not is_auth_enabled() or is_authenticated(self.headers.get("Cookie")):
+            return True
+        self.send_json({"error": "Login requerido"}, 401)
+        return False
 
     def analyze_all(self) -> None:
         imported = self.import_saved_ai_candidates()
@@ -217,6 +273,7 @@ class Handler(BaseHTTPRequestHandler):
         product, supplier = get_product_and_supplier(product_id)
         opportunity = analyze_product(product, supplier)
         opportunity_id = upsert_opportunity(opportunity)
+        self.build_and_store_plan(product_id, opportunity_id)
         draft = build_listing_draft(product, opportunity)
         draft_id = insert_listing_draft(draft, opportunity_id)
         created = get_listing_draft(draft_id)
@@ -262,7 +319,8 @@ class Handler(BaseHTTPRequestHandler):
         snapshot = self.refresh_market_snapshot(product_id)
         product, supplier = get_product_and_supplier(product_id)
         opportunity = analyze_product(product, supplier)
-        upsert_opportunity(opportunity)
+        opportunity_id = upsert_opportunity(opportunity)
+        self.build_and_store_plan(product_id, opportunity_id)
         self.send_json(
             {
                 "ok": True,
@@ -296,6 +354,8 @@ class Handler(BaseHTTPRequestHandler):
         opportunity = analyze_product(product, supplier)
         upsert_opportunity(opportunity)
         checklist = build_purchase_checklist()
+        route = supplier_order_route(product, supplier, int(payload.get("quantity") or 1))
+        checklist = route["steps"] + checklist
         checklist.insert(
             0,
             "Comparacion Mercado Libre: "
@@ -318,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
             "status": PurchaseOrderStatus.PURCHASE_NEEDED.value,
         }
         order_id = insert_purchase_order(order)
-        self.send_json({"ok": True, "id": order_id}, 201)
+        self.send_json({"ok": True, "id": order_id, "supplier_route": route}, 201)
 
     def create_storefront_order(self, payload: dict) -> None:
         items = payload.get("items") or []
@@ -382,12 +442,22 @@ class Handler(BaseHTTPRequestHandler):
                 "subtotal": round(subtotal, 2),
                 "status": "pending_payment",
                 "purchase_order_ids": purchase_order_ids,
+                "platform_fee": round(subtotal * float(os.environ.get("STRIPE_PLATFORM_COMMISSION_RATE", "0.10")), 2),
             }
         )
         for purchase_order_id in purchase_order_ids:
             # Keep sale reference traceable after the storefront order id exists.
             pass
         whatsapp = build_whatsapp_checkout(order_id, customer_name, customer_phone, order_items, subtotal)
+        checkout_url = None
+        stripe_error = None
+        if os.environ.get("STRIPE_SECRET_KEY"):
+            try:
+                session = create_checkout_session(order_id, order_items, subtotal)
+                update_storefront_order_stripe(order_id, session)
+                checkout_url = session.get("url")
+            except Exception as exc:
+                stripe_error = str(exc)
         self.send_json(
             {
                 "ok": True,
@@ -396,9 +466,31 @@ class Handler(BaseHTTPRequestHandler):
                 "subtotal": round(subtotal, 2),
                 "purchase_order_ids": purchase_order_ids,
                 "whatsapp_url": whatsapp,
+                "checkout_url": checkout_url,
+                "stripe_error": stripe_error,
             },
             201,
         )
+
+    def create_stripe_checkout(self, order_id: int) -> None:
+        orders = {int(order["id"]): order for order in fetch_storefront_orders()}
+        order = orders.get(order_id)
+        if not order:
+            raise ApiError(404, "Pedido no encontrado")
+        session = create_checkout_session(order_id, order["items"], float(order["subtotal"]))
+        update_storefront_order_stripe(order_id, session)
+        self.send_json({"ok": True, "checkout_url": session.get("url"), "session_id": session.get("id")})
+
+    def handle_stripe_webhook(self) -> None:
+        length = int(self.headers.get("Content-Length", "0"))
+        payload = self.rfile.read(length)
+        event = parse_webhook(payload, self.headers.get("Stripe-Signature"))
+        if event.get("type") == "checkout.session.completed":
+            session = event.get("data", {}).get("object", {})
+            order_id = int(session.get("client_reference_id") or session.get("metadata", {}).get("storefront_order_id") or 0)
+            if order_id:
+                mark_storefront_order_paid(order_id, session.get("payment_status") or "paid")
+        self.send_json({"received": True})
 
     def build_static_path(self, path: str) -> str:
         if path in {"", "/"}:
@@ -438,8 +530,35 @@ class Handler(BaseHTTPRequestHandler):
         product_id = import_ai_candidate(run_id, candidate_index)
         product, supplier = get_product_and_supplier(product_id)
         opportunity = analyze_product(product, supplier)
-        upsert_opportunity(opportunity)
+        opportunity_id = upsert_opportunity(opportunity)
+        self.build_and_store_plan(product_id, opportunity_id)
         return {"product_id": product_id, "status": opportunity.signal.value}
+
+    def build_and_store_plan(self, product_id: int, opportunity_id: int | None = None) -> int:
+        row = next((item for item in fetch_opportunities() if int(item["product_id"]) == product_id), None)
+        if not row:
+            return 0
+        plan = build_investment_plan(row)
+        html = plan_to_html(plan)
+        return upsert_investment_plan(product_id, opportunity_id, plan, html)
+
+    def send_investment_plan(self, product_id: int, pdf: bool = False) -> None:
+        stored = get_investment_plan(product_id)
+        if not stored:
+            self.build_and_store_plan(product_id)
+            stored = get_investment_plan(product_id)
+        if not stored:
+            raise ApiError(404, "Plan de inversion no encontrado")
+        if pdf:
+            body = plan_to_pdf_bytes(stored["plan"])
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", f"inline; filename=neobot-plan-{product_id}.pdf")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_json({"ok": True, "id": stored["id"], "plan": stored["plan"], "html": stored["html"]})
 
     def read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
@@ -448,10 +567,12 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length).decode("utf-8")
         return json.loads(raw)
 
-    def send_json(self, payload: object, status: int = 200) -> None:
+    def send_json(self, payload: object, status: int = 200, headers: dict[str, str] | None = None) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

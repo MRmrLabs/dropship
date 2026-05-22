@@ -7,7 +7,10 @@ const state = {
   storeOrders: [],
   meli: null,
   openai: null,
+  stripe: null,
+  auth: null,
   aiRuns: [],
+  currentPlanProductId: null,
 };
 
 const api = async (path, options = {}) => {
@@ -16,6 +19,10 @@ const api = async (path, options = {}) => {
     ...options,
   });
   const payload = await response.json();
+  if (response.status === 401) {
+    showLogin();
+    throw new Error(payload.error || "Login requerido");
+  }
   if (!response.ok) throw new Error(payload.error || "Error API");
   return payload;
 };
@@ -40,7 +47,8 @@ const defaultDiscoveryQuery =
 let busy = false;
 
 async function refresh() {
-  const [suppliers, products, opportunities, drafts, orders, storeOrders, meli, openai, aiRuns] = await Promise.all([
+  const [auth, suppliers, products, opportunities, drafts, orders, storeOrders, meli, openai, stripe, aiRuns] = await Promise.all([
+    api("/api/auth/status"),
     api("/api/suppliers"),
     api("/api/products"),
     api("/api/opportunity-list"),
@@ -49,9 +57,11 @@ async function refresh() {
     api("/api/storefront/orders"),
     api("/api/integrations/meli/status"),
     api("/api/integrations/openai/status"),
+    api("/api/integrations/stripe/status"),
     api("/api/ai/research-runs"),
   ]);
-  Object.assign(state, { suppliers, products, opportunities, drafts, orders, storeOrders, meli, openai, aiRuns });
+  Object.assign(state, { auth, suppliers, products, opportunities, drafts, orders, storeOrders, meli, openai, stripe, aiRuns });
+  hideLogin();
   render();
 }
 
@@ -117,6 +127,10 @@ function renderOpportunityCard(item) {
           <div><span>Margen real</span><strong>${pct(item.net_margin_rate)}</strong></div>
           <div><span>Precio sugerido</span><strong>${money(item.suggested_price)}</strong></div>
         </div>
+        <div class="supplier-focus">
+          <strong>Comprar proveedor: ${money(item.cost)}</strong>
+          <span>${item.supplier_name} · llega en ${item.lead_time_days} dia(s)</span>
+        </div>
         <div class="signal-grid">
           <span>Saturacion <b>${intel.saturation || "Media"}</b></span>
           <span>Competencia ML <b>${intel.competition || "Media"}</b></span>
@@ -129,6 +143,8 @@ function renderOpportunityCard(item) {
           <span>Comision ${money(financials.marketplace_fee || financials.fees)}</span>
           <span>IVA ${money(financials.iva)}</span>
           <span>Ads ${money(financials.ads)}</span>
+          <span>Stripe ${money(financials.stripe_fee)}</span>
+          <span>Comision NEOBOT ${money(financials.platform_commission)}</span>
         </div>
         ${renderAlerts(item)}
         ${item.duplicate_count > 1 ? `<p class="dupes">${item.duplicate_count - 1} variante(s) agrupada(s). Mostrando el mejor match.</p>` : ""}
@@ -145,9 +161,11 @@ function renderOpportunityActions(item) {
   }
   return `
     <div class="actions">
+      <button class="primary" onclick="openInvestmentPlan(${item.product_id})">Ver plan</button>
       <button class="primary" onclick="createDraft(${item.product_id})">Crear publicacion</button>
       <button onclick="compareMarket(${item.product_id})">Comparar ML</button>
       <button onclick="createOrder(${item.product_id})">Crear orden</button>
+      <button onclick="openSupplierRoute(${item.product_id})">Comprar proveedor</button>
       <button onclick="rejectOpportunity(${item.product_id})">Rechazar</button>
     </div>
   `;
@@ -222,6 +240,9 @@ function renderOrders() {
           <p>Costo: ${money(item.supplier_cost)} · envio proveedor: ${money(item.supplier_shipping)}</p>
           <ul class="checklist">${item.checklist.map((entry) => `<li>${entry}</li>`).join("")}</ul>
         </div>
+        <div class="actions">
+          <button class="primary" onclick="openUrl('${item.supplier_url}')">Comprar proveedor</button>
+        </div>
       </article>
     `
     )
@@ -243,6 +264,7 @@ function renderStoreOrders() {
           <h3>Pedido web #${order.id} · ${money(order.subtotal)}</h3>
           <div class="meta">
             <span class="pill yellow">${order.status}</span>
+            ${order.stripe_payment_status ? `<span class="pill green">Stripe ${order.stripe_payment_status}</span>` : ""}
             <span class="pill">${order.customer_name}</span>
             <span class="pill">${order.customer_phone}</span>
           </div>
@@ -296,6 +318,17 @@ function renderIntegrations() {
         <button class="primary" onclick="connectMeli()" ${!meli.configured ? "disabled" : ""}>Conectar</button>
         <button onclick="checkMeliMe()" ${!meli.connected ? "disabled" : ""}>Verificar cuenta</button>
         <button onclick="openMeliListings()" ${!meli.user_id ? "disabled" : ""}>Ver mis publicaciones</button>
+      </div>
+    </article>
+    <article class="row">
+      <div>
+        <h3>Stripe Connect</h3>
+        <div class="meta">
+          <span class="pill ${state.stripe?.configured ? "green" : "yellow"}">${state.stripe?.configured ? "Listo para cobrar" : "Falta STRIPE_SECRET_KEY"}</span>
+          <span class="pill">${Math.round(Number(state.stripe?.commission_rate || 0) * 100)}% comision</span>
+          <span class="pill">${state.stripe?.mode || "checkout"}</span>
+        </div>
+        <p>Base para cobrar ventas reales y comision configurable con Stripe Connect.</p>
       </div>
     </article>
     <article class="row">
@@ -397,6 +430,48 @@ async function createOrder(productId, listingDraftId = null) {
   });
   await refresh();
   alert(`Orden ${payload.id} creada con comparacion de Mercado Libre actualizada.`);
+}
+
+async function openInvestmentPlan(productId) {
+  state.currentPlanProductId = productId;
+  const payload = await api(`/api/investment-plans/${productId}`);
+  const plan = payload.plan || {};
+  document.querySelector("#planTitle").textContent = `Plan: ${plan.title || "producto"}`;
+  document.querySelector("#planContent").innerHTML = renderInvestmentPlan(plan);
+  document.querySelector("#planModal").classList.remove("hidden");
+}
+
+function renderInvestmentPlan(plan) {
+  const rows = [
+    ["Proveedor", plan.supplier_name],
+    ["URL oficial", plan.supplier_url ? `<a href="${plan.supplier_url}" target="_blank" rel="noreferrer">${plan.supplier_url}</a>` : "Pendiente"],
+    ["Cantidad sugerida", `${plan.quantity} unidad(es)`],
+    ["Inversion", money(plan.total_investment)],
+    ["Precio venta ML", money(plan.suggested_sale_price)],
+    ["Ganancia esperada", money(plan.expected_profit)],
+    ["Margen", pct(plan.net_margin_rate)],
+    ["ROI", pct(plan.roi)],
+    ["Llegada", `${plan.lead_time_days} dia(s)`],
+  ];
+  return `
+    <div class="plan-score">
+      <span class="decision green">${plan.verdict || "Revisar"} · ${plan.score || 0}/100</span>
+      <span>Saturacion ${plan.saturation || "Media"} · Devolucion ${plan.return_risk || "Medio"} · Visual ${plan.visual_potential || "Medio"}</span>
+    </div>
+    <table class="plan-table">${rows.map(([key, value]) => `<tr><th>${key}</th><td>${value}</td></tr>`).join("")}</table>
+    <h3>Pasos exactos</h3>
+    <ol class="checklist">${(plan.steps || []).map((step) => `<li>${step}</li>`).join("")}</ol>
+    <h3>Riesgos y validaciones</h3>
+    <ul class="checklist">${(plan.risks || ["Sin alertas bloqueantes"]).map((risk) => `<li>${risk}</li>`).join("")}</ul>
+  `;
+}
+
+async function openSupplierRoute(productId) {
+  const route = await api(`/api/supplier-order-route/${productId}`);
+  openProgress("Compra con proveedor");
+  logProgress(`Ruta: ${route.type}. Confirmacion final requerida.`, "done");
+  (route.steps || []).forEach((step) => logProgress(step));
+  if (route.url) window.open(route.url, "_blank", "noopener");
 }
 
 async function connectMeli() {
@@ -529,6 +604,40 @@ function closeProgress() {
   document.querySelector("#progressModal").classList.add("hidden");
 }
 
+function closePlan() {
+  document.querySelector("#planModal").classList.add("hidden");
+}
+
+function downloadPlanPdf() {
+  if (!state.currentPlanProductId) return;
+  window.open(`/api/investment-plans/${state.currentPlanProductId}.pdf`, "_blank", "noopener");
+}
+
+function showLogin() {
+  document.querySelector("#loginGate")?.classList.remove("hidden");
+}
+
+function hideLogin() {
+  if (!state.auth?.enabled || state.auth?.authenticated) {
+    document.querySelector("#loginGate")?.classList.add("hidden");
+  }
+}
+
+async function loginAdmin(event) {
+  event.preventDefault();
+  const password = document.querySelector("#adminPassword").value;
+  try {
+    await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    });
+    document.querySelector("#loginError").textContent = "";
+    await refresh();
+  } catch (error) {
+    document.querySelector("#loginError").textContent = error.message;
+  }
+}
+
 function initials(value) {
   return String(value || "ML")
     .split(/\s+/)
@@ -542,6 +651,9 @@ document.querySelector("#analyzeBtn").addEventListener("click", async () => {
   await discoverAndAnalyze();
 });
 document.querySelector("#progressClose").addEventListener("click", closeProgress);
+document.querySelector("#planClose").addEventListener("click", closePlan);
+document.querySelector("#planPdfBtn").addEventListener("click", downloadPlanPdf);
+document.querySelector("#loginForm").addEventListener("submit", loginAdmin);
 document.querySelector("#aiSearchForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   await runAiSearch(document.querySelector("#aiQuery").value);

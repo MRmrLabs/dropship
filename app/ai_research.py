@@ -14,7 +14,7 @@ DEFAULT_MIN_INTERVAL_SECONDS = 300
 DEFAULT_MAX_CANDIDATES = 4
 DEFAULT_MODEL = "gpt-4.1-mini"
 DEFAULT_TIMEOUT_SECONDS = 60
-DEFAULT_MAX_OUTPUT_TOKENS = 1600
+DEFAULT_MAX_OUTPUT_TOKENS = 2600
 
 
 def openai_status() -> dict[str, Any]:
@@ -38,8 +38,8 @@ def research_products(query: str | None = None) -> dict[str, Any]:
 
     prompt = build_research_prompt(query)
     payload = {
-        "model": os.environ.get("OPENAI_WEB_MODEL", DEFAULT_MODEL),
-        "max_output_tokens": int(os.environ.get("OPENAI_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)),
+        "model": os.environ.get("OPENAI_DEEP_ANALYSIS_MODEL", os.environ.get("OPENAI_WEB_MODEL", DEFAULT_MODEL)),
+        "max_output_tokens": int(os.environ.get("OPENAI_DEEP_MAX_OUTPUT_TOKENS", os.environ.get("OPENAI_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS))),
         "text": {
             "format": {
                 "type": "json_schema",
@@ -138,6 +138,13 @@ def research_schema() -> dict[str, Any]:
                         "warranty": {"type": "string"},
                         "lead_time_days": {"type": "integer", "minimum": 1, "maximum": 10},
                         "source_urls": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                        "supplier_buy_url": {"type": "string"},
+                        "meli_reference_urls": {"type": "array", "items": {"type": "string"}},
+                        "competition_count_estimate": {"type": "integer", "minimum": 0},
+                        "saturation_signal": {"type": "string"},
+                        "demand_signal": {"type": "string"},
+                        "why_it_can_sell": {"type": "string"},
+                        "investment_plan": {"type": "string"},
                         "risk_flags": {"type": "array", "items": {"type": "string"}},
                         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                         "notes": {"type": "string"},
@@ -157,6 +164,13 @@ def research_schema() -> dict[str, Any]:
                         "warranty",
                         "lead_time_days",
                         "source_urls",
+                        "supplier_buy_url",
+                        "meli_reference_urls",
+                        "competition_count_estimate",
+                        "saturation_signal",
+                        "demand_signal",
+                        "why_it_can_sell",
+                        "investment_plan",
                         "risk_flags",
                         "confidence",
                         "notes",
@@ -174,6 +188,7 @@ def build_research_prompt(query: str | None) -> str:
 Actua como comprador experto de e-commerce en Mexico. Busca oportunidades reales, no productos genericos faciles de descartar.
 
 Objetivo: encontrar productos concretos, comprables y revendibles en Mercado Libre Mexico con margen neto mayor a 15%.
+Haz una investigacion profunda por candidato. No premies solo margen: califica si realmente puede venderse.
 
 Busca proveedores reales en Mexico para mayoreo, distribucion autorizada o venta B2B.
 Cada candidato debe ser un producto especifico, no una categoria. Ejemplos buenos:
@@ -188,6 +203,7 @@ Prioriza candidatos con evidencia publica de:
 - proveedor mexicano o distribuidor con operacion clara en Mexico;
 - productos de bajo riesgo: hubs USB-C, soportes, organizadores, accesorios ergonomicos, cables certificados genericos, perifericos sin marca restringida.
 - una URL donde se pueda comprar o solicitar mayoreo.
+- referencias de Mercado Libre para comparar precio, saturacion y vendedores.
 
 Evita traer candidatos si solo encuentras:
 - marketplaces retail sin margen claro;
@@ -199,6 +215,15 @@ Evita traer candidatos si solo encuentras:
 No inventes datos. Si no hay al menos una fuente que apoye proveedor + producto, no incluyas el candidato.
 Nunca uses 0, 1, 9.99 ni valores placeholder en precios. Si no puedes confirmar un precio realista de proveedor y un precio realista de mercado, omite ese candidato.
 Si el costo/stock/envio no esta claro pero el proveedor parece real, marca el riesgo y baja la confianza.
+Busca productos con nombre/modelo concreto. Ejemplo malo: "cables USB-C". Ejemplo bueno: "Cable USB-C a USB-C 100W 2m nylon trenzado marca X modelo Y".
+
+Por cada candidato explica:
+- comprarlo aqui: URL oficial del proveedor;
+- venderlo en ML a: precio sugerido;
+- cuanto pedir al inicio: 1, 3 o 5 unidades segun riesgo;
+- por que podria venderse;
+- que validaciones faltan antes de invertir;
+- si la saturacion es baja, media o alta.
 
 Consulta: {search_query}
 
@@ -221,6 +246,13 @@ Devuelve datos estructurados con esta forma:
       "warranty": "texto breve",
       "lead_time_days": 3,
       "source_urls": ["https://..."],
+      "supplier_buy_url": "https://...",
+      "meli_reference_urls": ["https://..."],
+      "competition_count_estimate": 12,
+      "saturation_signal": "baja|media|alta",
+      "demand_signal": "baja|media|alta",
+      "why_it_can_sell": "razon comercial",
+      "investment_plan": "pide 3, cuesta X, vendes a Y, tarda Z dias, valida A/B/C",
       "risk_flags": ["riesgo"],
       "confidence": 0.0,
       "notes": "comprarlo aqui, venderlo a este precio y que validar"

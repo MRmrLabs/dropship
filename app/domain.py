@@ -13,6 +13,9 @@ ML_COMMISSION_RATE = float(os.environ.get("ML_COMMISSION_RATE", "0.145"))
 IVA_RATE = float(os.environ.get("MX_IVA_RATE", "0.16"))
 ADS_RATE = float(os.environ.get("ESTIMATED_ADS_RATE", "0.06"))
 RETURN_BUFFER_RATE = float(os.environ.get("RETURN_BUFFER_RATE", "0.03"))
+STRIPE_FEE_RATE = float(os.environ.get("STRIPE_FEE_RATE", "0.036"))
+STRIPE_FIXED_FEE = float(os.environ.get("STRIPE_FIXED_FEE_MXN", "3.00"))
+PLATFORM_COMMISSION_RATE = float(os.environ.get("STRIPE_PLATFORM_COMMISSION_RATE", "0.10"))
 SAFE_CATEGORIES = {
     "cables",
     "cargadores",
@@ -115,9 +118,16 @@ def money(value: float) -> float:
 
 def calculate_financials(product: SupplierProduct) -> dict[str, float]:
     target_price = product.market_competition_price * 0.98
-    floor_price = (product.cost + product.supplier_shipping) / (
-        1 - ML_COMMISSION_RATE - IVA_RATE - ADS_RATE - RETURN_BUFFER_RATE - MIN_NET_MARGIN
+    variable_cost_rate = (
+        ML_COMMISSION_RATE
+        + IVA_RATE
+        + ADS_RATE
+        + RETURN_BUFFER_RATE
+        + STRIPE_FEE_RATE
+        + PLATFORM_COMMISSION_RATE
+        + MIN_NET_MARGIN
     )
+    floor_price = (product.cost + product.supplier_shipping + STRIPE_FIXED_FEE) / (1 - variable_cost_rate)
     suggested_price = max(target_price, floor_price)
     suggested_price = ceil(suggested_price / 5) * 5
 
@@ -125,7 +135,18 @@ def calculate_financials(product: SupplierProduct) -> dict[str, float]:
     iva = suggested_price * IVA_RATE
     ads = suggested_price * ADS_RATE
     return_buffer = suggested_price * RETURN_BUFFER_RATE
-    total_cost = product.cost + product.supplier_shipping + marketplace_fee + iva + ads + return_buffer
+    stripe_fee = suggested_price * STRIPE_FEE_RATE + STRIPE_FIXED_FEE
+    platform_commission = suggested_price * PLATFORM_COMMISSION_RATE
+    total_cost = (
+        product.cost
+        + product.supplier_shipping
+        + marketplace_fee
+        + iva
+        + ads
+        + return_buffer
+        + stripe_fee
+        + platform_commission
+    )
     net_profit = suggested_price - total_cost
     net_margin_rate = net_profit / suggested_price if suggested_price else 0
 
@@ -136,6 +157,8 @@ def calculate_financials(product: SupplierProduct) -> dict[str, float]:
         "iva": money(iva),
         "ads": money(ads),
         "return_buffer": money(return_buffer),
+        "stripe_fee": money(stripe_fee),
+        "platform_commission": money(platform_commission),
         "total_cost": money(total_cost),
         "net_profit": money(net_profit),
         "net_margin_rate": round(net_margin_rate, 4),

@@ -110,6 +110,14 @@ h1 {
   cursor: pointer;
   width: 100%;
   margin-top: 14px;
+  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.primary-link:hover,
+.primary:hover {
+  background: #2a3038;
+  box-shadow: 0 14px 30px rgb(25 31 40 / 14%);
+  transform: translateY(-1px);
 }
 
 main {
@@ -132,6 +140,13 @@ main {
 
 .product-card {
   overflow: hidden;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.product-card:hover {
+  transform: translateY(-2px);
+  border-color: #cbd5e1;
+  box-shadow: 0 26px 56px rgb(25 31 40 / 12%);
 }
 
 .product-card img,
@@ -176,6 +191,14 @@ main {
   background: #fff;
   font-weight: 850;
   cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.product-card button:hover,
+.cart-line button:hover {
+  border-color: #b9c3d2;
+  box-shadow: 0 8px 20px rgb(25 31 40 / 8%);
+  transform: translateY(-1px);
 }
 
 .cart-line {
@@ -213,6 +236,14 @@ textarea {
   min-height: 42px;
   padding: 10px 12px;
   font: inherit;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+input:focus,
+textarea:focus {
+  border-color: #9aa8ba;
+  box-shadow: 0 0 0 3px rgb(17 24 39 / 8%);
+  outline: none;
 }
 
 textarea {
