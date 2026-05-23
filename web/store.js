@@ -11,19 +11,19 @@ async function api(path, options = {}) {
 
 function loadCart() {
   try {
-    return JSON.parse(localStorage.getItem("neobot_cart") || "[]");
+    return JSON.parse(localStorage.getItem("primeloot_cart") || "[]");
   } catch {
     return [];
   }
 }
 
 function saveCart() {
-  localStorage.setItem("neobot_cart", JSON.stringify(state.cart));
+  localStorage.setItem("primeloot_cart", JSON.stringify(state.cart));
 }
 
 async function loadStore() {
   const payload = await api("/api/storefront/products");
-  document.querySelector("#brandName").textContent = payload.brand || "NEOBOT Store";
+  document.querySelector("#brandName").textContent = payload.brand || "PrimeLoot Store";
   state.products = payload.products || [];
   renderProducts();
   renderCart();

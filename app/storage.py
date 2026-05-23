@@ -586,7 +586,7 @@ def storefront_description(item: dict[str, Any]) -> str:
     brand = str(item.get("brand") or "").strip()
     prefix = f"{brand} " if brand and brand.lower() not in {"generico", "genérico"} else ""
     return (
-        f"{prefix}{category} seleccionado por NEOBOT por su margen, disponibilidad y potencial de venta. "
+        f"{prefix}{category} seleccionado por PrimeLoot por su margen, disponibilidad y potencial de venta. "
         "Pedido sujeto a confirmacion de stock antes de pago."
     )
 

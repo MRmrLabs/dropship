@@ -1,6 +1,6 @@
-# Bot Dropshipping Tech MX
+# PrimeLoot Opportunity Engine
 
-MVP local para evaluar accesorios tecnologicos reales en Mexico, detectar oportunidades con margen neto minimo de 15%, crear publicaciones para Mercado Libre, generar planes de inversion y preparar ventas directas con Stripe.
+Motor local-first para evaluar accesorios tecnologicos reales en Mexico, detectar oportunidades con margen neto minimo, crear publicaciones para Mercado Libre, generar planes de inversion y preparar ventas directas con Stripe.
 
 ## Ejecutar
 
@@ -47,11 +47,18 @@ DEEP_SEARCH_MAX_MINUTES=20
 ML_TRENDS_ENABLED=true
 ML_MARKET_VERIFY_ENABLED=true
 REJECT_MEMORY_DAYS=30
+LOCAL_SEARCH_ENABLED=true
+LOCAL_SEARCH_PROFILE=balanced
+LOCAL_SEARCH_MAX_HOURS=6
+LOCAL_SEARCH_POOL_SIZE=300
+LOCAL_SUPPLIER_URLS=
+OPENAI_FINAL_JUDGE_ONLY=true
+OPENAI_FINALISTS_LIMIT=10
 ML_COMMISSION_RATE=0.145
 MX_IVA_RATE=0.16
 ESTIMATED_ADS_RATE=0.06
 RETURN_BUFFER_RATE=0.03
-STORE_BRAND=NEOBOT Store
+STORE_BRAND=PrimeLoot Store
 STORE_WHATSAPP=5215512345678
 ADMIN_PASSWORD=cambia_esto
 STRIPE_SECRET_KEY=
@@ -83,6 +90,13 @@ DEEP_SEARCH_MAX_MINUTES=20
 ML_TRENDS_ENABLED=true
 ML_MARKET_VERIFY_ENABLED=true
 REJECT_MEMORY_DAYS=30
+LOCAL_SEARCH_ENABLED=true
+LOCAL_SEARCH_PROFILE=balanced
+LOCAL_SEARCH_MAX_HOURS=6
+LOCAL_SEARCH_POOL_SIZE=300
+LOCAL_SUPPLIER_URLS=
+OPENAI_FINAL_JUDGE_ONLY=true
+OPENAI_FINALISTS_LIMIT=10
 ADMIN_PASSWORD=cambia_esto
 ADMIN_SESSION_SECRET=cambia_esto_tambien
 ```
@@ -130,7 +144,7 @@ STRIPE_PLATFORM_COMMISSION_RATE=0.10
 PUBLIC_BASE_URL=https://tu-servicio.onrender.com
 ```
 
-Si `STRIPE_CONNECTED_ACCOUNT_ID` existe, NEOBOT prepara el cobro con transferencia a la cuenta conectada y comision de plataforma. Si no existe, cobra con Checkout normal en tu cuenta.
+Si `STRIPE_CONNECTED_ACCOUNT_ID` existe, PrimeLoot prepara el cobro con transferencia a la cuenta conectada y comision de plataforma. Si no existe, cobra con Checkout normal en tu cuenta.
 
 ## Pruebas
 
@@ -166,6 +180,13 @@ DEEP_SEARCH_MAX_MINUTES=20
 ML_TRENDS_ENABLED=true
 ML_MARKET_VERIFY_ENABLED=true
 REJECT_MEMORY_DAYS=30
+LOCAL_SEARCH_ENABLED=true
+LOCAL_SEARCH_PROFILE=balanced
+LOCAL_SEARCH_MAX_HOURS=6
+LOCAL_SEARCH_POOL_SIZE=300
+LOCAL_SUPPLIER_URLS=
+OPENAI_FINAL_JUDGE_ONLY=true
+OPENAI_FINALISTS_LIMIT=10
 ADMIN_PASSWORD=cambia_esto
 ADMIN_SESSION_SECRET=cambia_esto_tambien
 PUBLIC_BASE_URL=https://tu-servicio.onrender.com

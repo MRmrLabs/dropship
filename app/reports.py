@@ -5,6 +5,8 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from app.branding import app_name
+
 
 def build_investment_plan(item: dict[str, Any]) -> dict[str, Any]:
     intel = item.get("intelligence") or {}
@@ -92,7 +94,7 @@ def plan_to_html(plan: dict[str, Any]) -> str:
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <title>Plan de inversion NEOBOT</title>
+  <title>Plan de inversion {html.escape(app_name())}</title>
   <style>
     body {{ font-family: Arial, sans-serif; color: #15181d; margin: 32px; }}
     h1 {{ font-size: 26px; margin-bottom: 6px; }}
@@ -106,7 +108,7 @@ def plan_to_html(plan: dict[str, Any]) -> str:
 <body>
   <span class="badge">{html.escape(str(plan["verdict"]))} · Score {html.escape(str(plan["score"]))}/100</span>
   <h1>{html.escape(str(plan["title"]))}</h1>
-  <p>Plan generado por NEOBOT el {html.escape(str(plan["generated_at"]))}. Validar precio, stock y factura antes de pagar.</p>
+  <p>Plan generado por {html.escape(app_name())} el {html.escape(str(plan["generated_at"]))}. Validar precio, stock y factura antes de pagar.</p>
   <table>{table}</table>
   <h2>Pasos de ejecucion</h2>
   <ol>{steps}</ol>
@@ -118,7 +120,7 @@ def plan_to_html(plan: dict[str, Any]) -> str:
 
 def plan_to_pdf_bytes(plan: dict[str, Any]) -> bytes:
     lines = [
-        "NEOBOT - Plan de inversion",
+        f"{app_name()} - Plan de inversion",
         str(plan.get("title") or ""),
         f"Veredicto: {plan.get('verdict')} / Score {plan.get('score')}/100",
         f"Proveedor: {plan.get('supplier_name')}",

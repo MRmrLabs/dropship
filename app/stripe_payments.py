@@ -40,10 +40,10 @@ def create_checkout_session(order_id: int, items: list[dict[str, Any]], subtotal
         "cancel_url": cancel_url,
         "client_reference_id": str(order_id),
         "metadata[storefront_order_id]": str(order_id),
-        "metadata[source]": "neobot_storefront",
+        "metadata[source]": "primeloot_storefront",
     }
     for index, item in enumerate(items):
-        title = str(item.get("title") or "Producto NEOBOT")[:90]
+        title = str(item.get("title") or "Producto PrimeLoot")[:90]
         unit_amount = int(round(float(item.get("unit_price") or 0) * 100))
         quantity = int(item.get("quantity") or 1)
         data[f"line_items[{index}][quantity]"] = str(quantity)

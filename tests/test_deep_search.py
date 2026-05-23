@@ -64,15 +64,16 @@ class DeepSearchTests(unittest.TestCase):
             research_request=fake_research,
             market_compare=market,
             trends_fetcher=lambda _category: {"items": [{"keyword": "hub usb c"}]},
+            provider_verify=lambda _url: {"available": True, "reason": "ok", "has_buy_signal": True, "price_visible": 120},
         )
         result = engine.run("hubs usb c")
-        self.assertEqual(result["engine"], "deep_search_v2")
+        self.assertEqual(result["engine"], "primeloot_deep_search_v2")
         self.assertEqual(len(result["candidates"]), 4)
         self.assertEqual(result["candidates"][0]["score_details"]["signal"], "elite")
 
     @patch("app.deep_search.is_recently_rejected", lambda *args, **kwargs: False)
     def test_verifier_rejects_bad_availability(self):
-        verifier = OpportunityVerifier(market)
+        verifier = OpportunityVerifier(market, lambda _url: {"available": True, "reason": "ok"})
         result = verifier.verify(candidate(notes="agotado temporalmente"))
         self.assertFalse(result.accepted)
         self.assertIn("Disponibilidad", result.reason)

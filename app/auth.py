@@ -5,7 +5,7 @@ import os
 from http.cookies import SimpleCookie
 
 
-COOKIE_NAME = "neobot_admin"
+COOKIE_NAME = "primeloot_admin"
 
 
 def auth_status() -> dict[str, object]:
@@ -20,7 +20,7 @@ def admin_password() -> str:
 
 
 def auth_secret() -> str:
-    return os.environ.get("ADMIN_SESSION_SECRET", admin_password() or "neobot-dev-session")
+    return os.environ.get("ADMIN_SESSION_SECRET", admin_password() or "primeloot-dev-session")
 
 
 def is_auth_enabled() -> bool:

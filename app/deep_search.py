@@ -17,6 +17,7 @@ from app.ai_research import (
     build_research_prompt,
 )
 from app.meli_marketplace import compare_market_query, fetch_trends
+from app.provider_verifier import verify_provider_page
 from app.storage import (
     insert_market_snapshot,
     insert_rejected_candidate,
@@ -51,10 +52,12 @@ class DeepSearchEngine:
         research_request: Callable[[str, str], tuple[dict[str, Any], dict[str, Any]]] | None = None,
         market_compare: Callable[[str, float], dict[str, Any]] | None = None,
         trends_fetcher: Callable[[str | None], dict[str, Any]] | None = None,
+        provider_verify: Callable[[str], dict[str, Any]] | None = None,
     ) -> None:
         self.research_request = research_request or request_research
         self.market_compare = market_compare or compare_market_query
         self.trends_fetcher = trends_fetcher or fetch_trends
+        self.provider_verify = provider_verify or verify_provider_page
 
     def run(self, query: str | None = None) -> dict[str, Any]:
         api_key = os.environ.get("OPENAI_API_KEY", "")
@@ -109,7 +112,7 @@ class DeepSearchEngine:
             for item in rejected[-30:]:
                 insert_rejected_candidate(item.get("candidate", {}), item.get("reason", "rechazado"))
             raise ValueError(
-                f"Deep Search reviso {len(raw_candidates)} candidato(s), pero solo {len(accepted)} pasaron. "
+                f"PrimeLoot reviso {len(raw_candidates)} candidato(s), pero solo {len(accepted)} pasaron. "
                 "No se importo basura: revisa Descargados/Descartados y prueba otra categoria o mas intentos."
             )
 
@@ -127,8 +130,8 @@ class DeepSearchEngine:
 
         return {
             "query": query or default_deep_query(trends),
-            "summary": f"Deep Search encontro {len(winners)} oportunidades fuertes tras revisar {len(raw_candidates)} candidato(s).",
-            "engine": "deep_search_v2",
+            "summary": f"PrimeLoot encontro {len(winners)} oportunidades fuertes tras revisar {len(raw_candidates)} candidato(s).",
+            "engine": "primeloot_deep_search_v2",
             "stages": stages,
             "candidates": [self.public_candidate(result) for result in winners],
             "rejected": rejected[-20:],
@@ -154,7 +157,7 @@ class DeepSearchEngine:
             key = candidate_key(candidate)
             if key in accepted_keys or key in rejected_keys:
                 continue
-            result = OpportunityVerifier(self.market_compare).verify(candidate)
+            result = OpportunityVerifier(self.market_compare, self.provider_verify).verify(candidate)
             if result.accepted:
                 accepted.append(result)
                 accepted_keys.add(key)
@@ -172,15 +175,20 @@ class DeepSearchEngine:
         candidate["evidence"] = result.evidence
         candidate["risk_flags"] = list(dict.fromkeys((candidate.get("risk_flags") or []) + result.evidence.get("warnings", [])))
         candidate["notes"] = (
-            f"{candidate.get('notes', '')} | Deep Search: {result.reason}. "
+            f"{candidate.get('notes', '')} | PrimeLoot: {result.reason}. "
             f"Score {result.score['total']}/100."
         ).strip()
         return candidate
 
 
 class OpportunityVerifier:
-    def __init__(self, market_compare: Callable[[str, float], dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        market_compare: Callable[[str, float], dict[str, Any]] | None = None,
+        provider_verify: Callable[[str], dict[str, Any]] | None = None,
+    ) -> None:
         self.market_compare = market_compare or compare_market_query
+        self.provider_verify = provider_verify or verify_provider_page
 
     def verify(self, candidate: dict[str, Any]) -> VerificationResult:
         title = str(candidate.get("product_title") or "")
@@ -191,6 +199,10 @@ class OpportunityVerifier:
         reason = reject_reason(candidate)
         if reason:
             return self.reject(candidate, reason, {}, evidence)
+        provider_snapshot = self.provider_verify(buy_url)
+        evidence["supplier"] = provider_snapshot
+        if not provider_snapshot.get("available"):
+            return self.reject(candidate, str(provider_snapshot.get("reason") or "Proveedor no verificable"), {}, evidence)
 
         if os.environ.get("ML_MARKET_VERIFY_ENABLED", "true").lower() in {"1", "true", "yes"}:
             market = self.market_compare(title, float(candidate.get("estimated_market_price_mxn") or 0))
@@ -247,6 +259,7 @@ def score_candidate(candidate: dict[str, Any], market: dict[str, Any]) -> dict[s
     margin_rate = (suggested - cost - shipping) / max(suggested, 1)
     competition = str(market.get("competition_level") or candidate.get("saturation_signal") or "medium")
     count = int(market.get("count") or 0)
+    source_confidence = int(float(candidate.get("confidence") or 0) * 100)
     subscores = {
         "demanda": demand_score(candidate),
         "margen": clamp(int(margin_rate * 220), 0, 100),
@@ -254,6 +267,7 @@ def score_candidate(candidate: dict[str, Any], market: dict[str, Any]) -> dict[s
         "proveedor": supplier_score(candidate),
         "riesgo": risk_score(candidate),
         "ejecucion": execution_score(candidate),
+        "confianza_fuentes": source_confidence,
     }
     weights = {
         "demanda": 0.18,
@@ -262,6 +276,7 @@ def score_candidate(candidate: dict[str, Any], market: dict[str, Any]) -> dict[s
         "proveedor": 0.16,
         "riesgo": 0.12,
         "ejecucion": 0.12,
+        "confianza_fuentes": 0.0,
     }
     total = int(sum(subscores[key] * weights[key] for key in subscores))
     signal = "red"
@@ -276,6 +291,9 @@ def score_candidate(candidate: dict[str, Any], market: dict[str, Any]) -> dict[s
         "signal": signal,
         "subscores": subscores,
         "estimated_margin_rate": round(margin_rate, 4),
+        "sellability_score": clamp(int((subscores["demanda"] * 0.45) + (subscores["competencia"] * 0.35) + (subscores["ejecucion"] * 0.20)), 0, 100),
+        "profit_survival_score": clamp(int((subscores["margen"] * 0.70) + (subscores["riesgo"] * 0.30)), 0, 100),
+        "source_confidence_score": source_confidence,
     }
 
 
@@ -450,8 +468,12 @@ def empty_score() -> dict[str, Any]:
             "proveedor": 0,
             "riesgo": 0,
             "ejecucion": 0,
+            "confianza_fuentes": 0,
         },
         "estimated_margin_rate": 0,
+        "sellability_score": 0,
+        "profit_survival_score": 0,
+        "source_confidence_score": 0,
     }
 
 

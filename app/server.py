@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, quote, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.auth import auth_status, is_auth_enabled, is_authenticated, login_cookie, logout_cookie, verify_password
+from app.branding import store_brand
 from app.domain import (
     ListingStatus,
     PurchaseOrderStatus,
@@ -21,6 +22,12 @@ from app.domain import (
 )
 from app.ai_research import enforce_usage_limits, openai_status, research_products
 from app.deep_search import deep_search_products
+from app.local_search import (
+    get_local_search_job,
+    local_search_status,
+    start_local_search,
+    stop_local_search_job,
+)
 from app.meli_auth import build_authorization_url, exchange_code, fetch_me, integration_status
 from app.meli_marketplace import compare_market, publish_listing
 from app.reports import build_investment_plan, plan_to_html, plan_to_pdf_bytes
@@ -141,7 +148,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/purchase-orders":
             self.send_json(fetch_purchase_orders())
         elif path == "/api/storefront/products":
-            self.send_json({"brand": os.environ.get("STORE_BRAND", "NEOBOT Store"), "products": fetch_storefront_products()})
+            self.send_json({"brand": store_brand(), "products": fetch_storefront_products()})
         elif path == "/api/storefront/orders":
             self.send_json(fetch_storefront_orders())
         elif path == "/api/integrations/meli/status":
@@ -153,19 +160,36 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/integrations/openai/status":
             status = openai_status()
             status["searches_today"] = count_ai_research_runs_today()
+            status["local_search"] = local_search_status()
             self.send_json(status)
         elif path == "/api/integrations/stripe/status":
             self.send_json(stripe_status())
         elif path == "/api/ai/research-runs":
             self.send_json(fetch_ai_research_runs())
         elif path == "/api/ai/deep-search-runs":
-            runs = [run for run in fetch_ai_research_runs() if run.get("result", {}).get("engine") == "deep_search_v2"]
+            engine_names = {
+                "deep_search_v2",
+                "primeloot_deep_search_v2",
+                "primeloot_local_plus_openai",
+                "primeloot_local_search",
+            }
+            runs = [
+                run
+                for run in fetch_ai_research_runs()
+                if str(run.get("result", {}).get("engine") or "") in engine_names
+            ]
             self.send_json(runs)
         elif path.startswith("/api/opportunities/") and path.endswith("/evidence"):
             product_id = int(path.split("/")[-2])
             self.send_json(fetch_opportunity_evidence(product_id))
         elif path == "/api/rejected-candidates":
             self.send_json(fetch_rejected_candidates())
+        elif path.startswith("/api/local-search/status/"):
+            job_id = path.rsplit("/", 1)[1]
+            self.send_json(get_local_search_job(job_id))
+        elif path.startswith("/api/local-search/results/"):
+            job_id = path.rsplit("/", 1)[1]
+            self.send_local_search_results(job_id)
         elif path.startswith("/api/investment-plans/"):
             product_id = int(path.rsplit("/", 1)[1].replace(".pdf", ""))
             self.send_investment_plan(product_id, pdf=path.endswith(".pdf"))
@@ -212,6 +236,12 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/ai/deep-search":
             payload = self.read_json()
             self.create_deep_search(payload)
+        elif path == "/api/local-search/start":
+            payload = self.read_json()
+            self.send_json(start_local_search(payload.get("query") or None), 202)
+        elif path.startswith("/api/local-search/stop/"):
+            job_id = path.rsplit("/", 1)[1]
+            self.send_json(stop_local_search_job(job_id))
         elif path == "/api/ai/import-candidate":
             payload = self.read_json()
             imported = self.import_and_analyze_candidate(int(payload["run_id"]), int(payload["candidate_index"]))
@@ -558,6 +588,24 @@ class Handler(BaseHTTPRequestHandler):
             201,
         )
 
+    def send_local_search_results(self, job_id: str) -> None:
+        job = get_local_search_job(job_id)
+        result = job.get("result") or {}
+        if job.get("status") != "completed":
+            self.send_json(job)
+            return
+        if not result.get("imported") and result.get("candidates"):
+            run_id = insert_ai_research_run(result.get("query") or "local search", "completed", result)
+            imported: list[dict[str, int | str]] = []
+            for index, _candidate in enumerate(result.get("candidates", [])):
+                try:
+                    imported.append(self.import_and_analyze_candidate(run_id, index))
+                except Exception as exc:
+                    imported.append({"product_id": 0, "status": f"skipped: {exc}"})
+            result["imported"] = imported
+            result["run_id"] = run_id
+        self.send_json({"ok": True, "job": job, "result": result})
+
     def import_saved_ai_candidates(self) -> list[dict[str, int | str]]:
         imported: list[dict[str, int | str]] = []
         for run in fetch_ai_research_runs():
@@ -614,7 +662,7 @@ class Handler(BaseHTTPRequestHandler):
             body = plan_to_pdf_bytes(stored["plan"])
             self.send_response(200)
             self.send_header("Content-Type", "application/pdf")
-            self.send_header("Content-Disposition", f"inline; filename=neobot-plan-{product_id}.pdf")
+            self.send_header("Content-Disposition", f"inline; filename=primeloot-plan-{product_id}.pdf")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

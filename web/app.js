@@ -148,7 +148,7 @@ function renderOpportunityCard(item) {
           <span>IVA ${money(financials.iva)}</span>
           <span>Ads ${money(financials.ads)}</span>
           <span>Stripe ${money(financials.stripe_fee)}</span>
-          <span>Comision NEOBOT ${money(financials.platform_commission)}</span>
+          <span>Comision PrimeLoot ${money(financials.platform_commission)}</span>
         </div>
         ${renderAlerts(item)}
         ${item.duplicate_count > 1 ? `<p class="dupes">${item.duplicate_count - 1} variante(s) agrupada(s). Mostrando el mejor match.</p>` : ""}
@@ -425,7 +425,7 @@ function renderRejected() {
   const target = document.querySelector("#rejectedList");
   if (!target) return;
   if (!state.rejected.length) {
-    target.innerHTML = `<article class="empty-state"><h3>Sin descartados todavia</h3><p>Deep Search guardara aqui productos agotados, saturados o con mala evidencia.</p></article>`;
+    target.innerHTML = `<article class="empty-state"><h3>Sin descartados todavia</h3><p>PrimeLoot guardara aqui productos agotados, saturados o con mala evidencia.</p></article>`;
     return;
   }
   target.innerHTML = state.rejected
@@ -566,7 +566,7 @@ async function runAiSearch(query) {
       method: "POST",
       body: JSON.stringify({ query: query || defaultDiscoveryQuery }),
     });
-    logProgress("Deep Search guardado; productos top importados automaticamente a Oportunidades.", "done");
+    logProgress("PrimeLoot Local Search guardado; productos top importados automaticamente a Oportunidades.", "done");
     await refresh();
   } catch (error) {
     status.textContent = error.message;
@@ -615,16 +615,14 @@ async function discoverAndAnalyze() {
     logProgress("Buscando tendencias Mercado Libre.", "done");
     logProgress(`Generando pool de hasta ${state.openai.candidate_pool_size || 24} candidatos con IA web.`);
     logProgress("Verificando proveedor, stock, factura, ML y memoria de descartados.");
-    const research = await api("/api/ai/deep-search", {
+    const started = await api("/api/local-search/start", {
       method: "POST",
       body: JSON.stringify({ query }),
     });
+    const research = await waitLocalSearch(started.id);
     const candidates = research.result?.candidates || [];
-    const imported = research.imported || [];
-    (research.result?.stages || []).forEach((stage) => {
-      logProgress(`${stage.stage}: aceptados ${stage.accepted ?? "-"} pool ${stage.pool ?? "-"} rechazados ${stage.rejected ?? "-"}`);
-    });
-    logProgress(`Deep Search eligio ${candidates.length} candidato(s) top.`, "done");
+    const imported = research.result?.imported || [];
+    logProgress(`PrimeLoot eligio ${candidates.length} candidato(s) top.`, "done");
     logProgress(`Importacion automatica: ${imported.length} resultado(s).`, "done");
     for (let index = 0; index < candidates.length; index += 1) {
       const candidate = candidates[index];
@@ -643,6 +641,22 @@ async function discoverAndAnalyze() {
     busy = false;
     document.querySelector("#analyzeBtn").disabled = false;
     await refresh();
+  }
+}
+
+async function waitLocalSearch(jobId) {
+  let lastProgress = 0;
+  for (;;) {
+    const job = await api(`/api/local-search/status/${jobId}`);
+    const progress = job.progress || [];
+    progress.slice(lastProgress).forEach((entry) => logProgress(`${entry.stage}: ${entry.message}`, entry.ok === false ? "error" : ""));
+    lastProgress = progress.length;
+    if (job.status === "completed") {
+      return api(`/api/local-search/results/${jobId}`);
+    }
+    if (job.status === "failed") throw new Error(job.error || "Local Search fallo");
+    if (job.status === "stopped") throw new Error("Local Search detenido");
+    await new Promise((resolve) => setTimeout(resolve, 2500));
   }
 }
 
