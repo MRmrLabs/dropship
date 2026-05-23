@@ -76,6 +76,89 @@ def compare_market(product: SupplierProduct) -> dict[str, Any]:
     }
 
 
+def compare_market_query(query: str, reference_price: float = 0) -> dict[str, Any]:
+    payload = api_get(
+        f"/sites/{SITE_ID}/search",
+        {"q": query, "limit": 20, "condition": "new"},
+        auth=False,
+    )
+    results = payload.get("results", [])
+    parsed = []
+    seller_ids: set[str] = set()
+    full_count = 0
+    for item in results:
+        price = safe_float(item.get("price"))
+        title = str(item.get("title") or "")
+        if price <= 0 or not title:
+            continue
+        seller = item.get("seller") or {}
+        seller_id = str(seller.get("id") or "")
+        if seller_id:
+            seller_ids.add(seller_id)
+        shipping = item.get("shipping") or {}
+        if shipping.get("logistic_type") in {"fulfillment", "xd_drop_off"} or shipping.get("free_shipping"):
+            full_count += 1
+        parsed.append(
+            {
+                "id": item.get("id"),
+                "title": title,
+                "price": price,
+                "permalink": item.get("permalink"),
+                "seller_id": seller_id,
+                "shipping": shipping.get("logistic_type") or "",
+                "free_shipping": bool(shipping.get("free_shipping")),
+            }
+        )
+    clean = remove_price_outliers(parsed)
+    prices = [item["price"] for item in clean]
+    if not prices:
+        return {
+            "query": query,
+            "count": 0,
+            "reference_price": reference_price,
+            "median_price": reference_price,
+            "min_price": reference_price,
+            "seller_count": 0,
+            "full_shipping_count": 0,
+            "competition_level": "unknown",
+            "items": [],
+        }
+    min_price = min(prices)
+    median_price = float(median(prices))
+    count = int(payload.get("paging", {}).get("total") or len(clean))
+    competition_level = "low"
+    if count >= 150 or min_price < median_price * 0.72:
+        competition_level = "high"
+    elif count >= 45 or len(seller_ids) >= 8:
+        competition_level = "medium"
+    return {
+        "query": query,
+        "count": count,
+        "reference_price": round(median_price, 2),
+        "median_price": round(median_price, 2),
+        "min_price": round(min_price, 2),
+        "seller_count": len(seller_ids),
+        "full_shipping_count": full_count,
+        "competition_level": competition_level,
+        "items": clean[:8],
+    }
+
+
+def fetch_trends(category_id: str | None = None) -> dict[str, Any]:
+    if os.environ.get("ML_TRENDS_ENABLED", "true").lower() not in {"1", "true", "yes"}:
+        return {"enabled": False, "items": []}
+    path = f"/trends/{SITE_ID}/{category_id}" if category_id else f"/trends/{SITE_ID}"
+    try:
+        payload = api_get(path, auth=False)
+    except Exception as exc:
+        return {"enabled": True, "error": str(exc), "items": []}
+    if isinstance(payload, list):
+        items = payload
+    else:
+        items = payload.get("trends") or payload.get("items") or []
+    return {"enabled": True, "items": items[:30], "raw": payload}
+
+
 def publish_listing(draft: dict[str, Any], product: SupplierProduct) -> MarketplaceListing:
     access_token = get_access_token()
     category_id = predict_category(str(draft["title"]), access_token)

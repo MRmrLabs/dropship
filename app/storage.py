@@ -147,6 +147,49 @@ def init_db() -> None:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS market_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER,
+                query TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS supplier_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                supplier_name TEXT NOT NULL,
+                product_url TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS opportunity_evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER,
+                run_id INTEGER,
+                evidence_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS rejected_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                supplier_name TEXT NOT NULL,
+                product_url TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                candidate_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS trend_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id TEXT NOT NULL,
+                category_id TEXT,
+                snapshot_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         ensure_column(conn, "supplier_products", "status", "TEXT NOT NULL DEFAULT 'active'")
@@ -345,6 +388,18 @@ def fetch_opportunities() -> list[dict[str, Any]]:
                 risks=item["risks"],
             )
             item["intelligence"] = product_intelligence(product, supplier, real_opportunity)
+            evidence = conn.execute(
+                """
+                SELECT evidence_json
+                FROM opportunity_evidence
+                WHERE product_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (item["product_id"],),
+            ).fetchone()
+            if evidence:
+                item["evidence"] = json.loads(evidence["evidence_json"])
             output.append(item)
         return dedupe_opportunity_rows(output)
 
@@ -684,6 +739,118 @@ def latest_ai_research_run() -> dict[str, Any] | None:
             "SELECT * FROM ai_research_runs ORDER BY created_at DESC LIMIT 1"
         ).fetchone()
         return dict(row) if row else None
+
+
+def insert_market_snapshot(product_id: int | None, query: str, snapshot: dict[str, Any]) -> int:
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO market_snapshots (product_id, query, snapshot_json) VALUES (?, ?, ?)",
+            (product_id, query, json.dumps(snapshot, ensure_ascii=True)),
+        )
+        return int(cur.lastrowid)
+
+
+def insert_supplier_snapshot(supplier_name: str, product_url: str, snapshot: dict[str, Any]) -> int:
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO supplier_snapshots (supplier_name, product_url, snapshot_json) VALUES (?, ?, ?)",
+            (supplier_name, product_url, json.dumps(snapshot, ensure_ascii=True)),
+        )
+        return int(cur.lastrowid)
+
+
+def insert_opportunity_evidence(product_id: int | None, run_id: int | None, evidence: dict[str, Any]) -> int:
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO opportunity_evidence (product_id, run_id, evidence_json) VALUES (?, ?, ?)",
+            (product_id, run_id, json.dumps(evidence, ensure_ascii=True)),
+        )
+        return int(cur.lastrowid)
+
+
+def fetch_opportunity_evidence(product_id: int) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM opportunity_evidence WHERE product_id = ? ORDER BY created_at DESC LIMIT 20",
+            (product_id,),
+        ).fetchall()
+        output = []
+        for row in rows:
+            item = dict(row)
+            item["evidence"] = json.loads(item.pop("evidence_json"))
+            output.append(item)
+        return output
+
+
+def insert_rejected_candidate(candidate: dict[str, Any], reason: str) -> int:
+    with connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO rejected_candidates (title, supplier_name, product_url, reason, candidate_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                str(candidate.get("product_title") or candidate.get("title") or "")[:180],
+                str(candidate.get("supplier_name") or "")[:160],
+                str(candidate.get("supplier_buy_url") or candidate.get("product_url") or "")[:400],
+                reason[:500],
+                json.dumps(candidate, ensure_ascii=True),
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def fetch_rejected_candidates(limit: int = 80) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM rejected_candidates WHERE status = 'active' ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        output = []
+        for row in rows:
+            item = dict(row)
+            item["candidate"] = json.loads(item.pop("candidate_json"))
+            output.append(item)
+        return output
+
+
+def restore_rejected_candidate(candidate_id: int) -> None:
+    with connect() as conn:
+        cur = conn.execute("UPDATE rejected_candidates SET status = 'restored' WHERE id = ?", (candidate_id,))
+        if cur.rowcount == 0:
+            raise KeyError("Candidato rechazado no encontrado")
+
+
+def is_recently_rejected(title: str, product_url: str, days: int) -> bool:
+    title_key = normalize_title(title)
+    url_key = image_key(product_url)
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT title, product_url
+            FROM rejected_candidates
+            WHERE status = 'active'
+              AND datetime(created_at) >= datetime('now', ?)
+            ORDER BY created_at DESC
+            LIMIT 400
+            """,
+            (f"-{days} days",),
+        ).fetchall()
+        for row in rows:
+            if normalize_title(str(row["title"] or "")) == title_key:
+                return True
+            if url_key and image_key(str(row["product_url"] or "")) == url_key:
+                return True
+    return False
+
+
+def insert_trend_snapshot(site_id: str, category_id: str | None, snapshot: dict[str, Any]) -> int:
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO trend_snapshots (site_id, category_id, snapshot_json) VALUES (?, ?, ?)",
+            (site_id, category_id, json.dumps(snapshot, ensure_ascii=True)),
+        )
+        return int(cur.lastrowid)
 
 
 def import_ai_candidate(run_id: int, candidate_index: int) -> int:

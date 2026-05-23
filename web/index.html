@@ -39,6 +39,7 @@
         <button class="tab" data-tab="orders">Ordenes</button>
         <button class="tab" data-tab="suppliers">Proveedores</button>
         <button class="tab" data-tab="aiSearch">Busqueda IA</button>
+        <button class="tab" data-tab="rejected">Descartados</button>
         <button class="tab" data-tab="integrations">Integraciones</button>
       </nav>
 
@@ -101,6 +102,14 @@
           <p>Conecta Mercado Libre con OAuth. Los secretos viven solo en variables privadas.</p>
         </div>
         <div id="integrationList" class="list"></div>
+      </section>
+
+      <section id="rejected" class="panel">
+        <div class="section-head">
+          <h2>Descartados</h2>
+          <p>Memoria del motor: productos agotados, saturados o flojos que NEOBOT no debe repetir.</p>
+        </div>
+        <div id="rejectedList" class="list"></div>
       </section>
     </main>
 

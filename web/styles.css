@@ -483,6 +483,27 @@ button:disabled {
   padding-left: 18px;
 }
 
+.risk-list.good li {
+  color: var(--green);
+}
+
+.stage-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.stage-strip span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fbfcfe;
+  color: var(--muted);
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
 .modal {
   position: fixed;
   inset: 0;

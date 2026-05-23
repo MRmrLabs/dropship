@@ -10,6 +10,7 @@ const state = {
   stripe: null,
   auth: null,
   aiRuns: [],
+  rejected: [],
   currentPlanProductId: null,
 };
 
@@ -47,7 +48,7 @@ const defaultDiscoveryQuery =
 let busy = false;
 
 async function refresh() {
-  const [auth, suppliers, products, opportunities, drafts, orders, storeOrders, meli, openai, stripe, aiRuns] = await Promise.all([
+  const [auth, suppliers, products, opportunities, drafts, orders, storeOrders, meli, openai, stripe, aiRuns, rejected] = await Promise.all([
     api("/api/auth/status"),
     api("/api/suppliers"),
     api("/api/products"),
@@ -59,8 +60,9 @@ async function refresh() {
     api("/api/integrations/openai/status"),
     api("/api/integrations/stripe/status"),
     api("/api/ai/research-runs"),
+    api("/api/rejected-candidates"),
   ]);
-  Object.assign(state, { auth, suppliers, products, opportunities, drafts, orders, storeOrders, meli, openai, stripe, aiRuns });
+  Object.assign(state, { auth, suppliers, products, opportunities, drafts, orders, storeOrders, meli, openai, stripe, aiRuns, rejected });
   hideLogin();
   render();
 }
@@ -73,6 +75,7 @@ function render() {
   renderOrders();
   renderSuppliers();
   renderAiResearch();
+  renderRejected();
   renderIntegrations();
 }
 
@@ -132,6 +135,7 @@ function renderOpportunityCard(item) {
           <span>${item.supplier_name} · llega en ${item.lead_time_days} dia(s)</span>
         </div>
         <div class="signal-grid">
+          ${renderScoreDetails(item)}
           <span>Saturacion <b>${intel.saturation || "Media"}</b></span>
           <span>Competencia ML <b>${intel.competition || "Media"}</b></span>
           <span>Devolucion <b>${intel.return_risk || "Medio"}</b></span>
@@ -152,6 +156,16 @@ function renderOpportunityCard(item) {
         ${renderOpportunityActions(item)}
       </div>
     </article>
+  `;
+}
+
+function renderScoreDetails(item) {
+  const details = item.evidence?.score_details || item.score_details;
+  if (!details?.subscores) return "";
+  const subs = details.subscores;
+  return `
+    <span>Demanda <b>${subs.demanda || 0}/100</b></span>
+    <span>Proveedor <b>${subs.proveedor || 0}/100</b></span>
   `;
 }
 
@@ -362,6 +376,7 @@ function renderAiResearch() {
 function renderAiRun(run) {
   const result = run.result || {};
   const candidates = result.candidates || [];
+  const stages = result.stages || result.attempts || [];
   return `
     <article class="row">
       <div>
@@ -370,11 +385,17 @@ function renderAiRun(run) {
           <span class="pill">${run.status}</span>
           <span class="pill">${candidates.length} candidatos</span>
           <span class="pill">${run.created_at}</span>
+          ${result.engine ? `<span class="pill green">${result.engine}</span>` : ""}
         </div>
+        ${stages.length ? `<div class="stage-strip">${stages.map(renderStage).join("")}</div>` : ""}
         ${candidates.map((candidate, index) => renderCandidate(run.id, candidate, index)).join("")}
       </div>
     </article>
   `;
+}
+
+function renderStage(stage) {
+  return `<span>${stage.stage || `Intento ${stage.attempt || ""}`}: ${stage.accepted ?? stage.pool ?? stage.items ?? stage.returned ?? 0}</span>`;
 }
 
 function renderCandidate(runId, candidate, index) {
@@ -387,15 +408,45 @@ function renderCandidate(runId, candidate, index) {
         <span class="pill">${candidate.supplier_name || "Proveedor"}</span>
         <span class="pill">${candidate.category || "categoria"}</span>
         <span class="pill">Confianza ${Math.round(Number(candidate.confidence || 0) * 100)}%</span>
+        ${candidate.score_details ? `<span class="pill green">Deep ${candidate.score_details.total}/100</span>` : ""}
       </div>
       <p class="money">${money(candidate.estimated_market_price_mxn || 0)}</p>
       <p>Costo estimado ${money(candidate.estimated_cost_mxn || 0)} · envio ${money(candidate.estimated_shipping_mxn || 0)}</p>
       <p class="muted">${candidate.notes || "Validar condiciones con proveedor."}</p>
       ${risks.length ? `<ul class="risk-list">${risks.map((risk) => `<li>${risk}</li>`).join("")}</ul>` : ""}
+      ${candidate.evidence?.survived_because ? `<ul class="risk-list good">${candidate.evidence.survived_because.map((reason) => `<li>${reason}</li>`).join("")}</ul>` : ""}
       <p>${urls.map((url) => `<a href="${url}" target="_blank" rel="noreferrer">Fuente</a>`).join(" · ")}</p>
       <div class="actions"><button onclick="importCandidate(${runId}, ${index})">Reimportar</button></div>
     </div>
   `;
+}
+
+function renderRejected() {
+  const target = document.querySelector("#rejectedList");
+  if (!target) return;
+  if (!state.rejected.length) {
+    target.innerHTML = `<article class="empty-state"><h3>Sin descartados todavia</h3><p>Deep Search guardara aqui productos agotados, saturados o con mala evidencia.</p></article>`;
+    return;
+  }
+  target.innerHTML = state.rejected
+    .map(
+      (item) => `
+      <article class="row">
+        <div>
+          <h3>${item.title || "Candidato rechazado"}</h3>
+          <div class="meta">
+            <span class="pill red">${item.reason}</span>
+            <span class="pill">${item.supplier_name || "Proveedor"}</span>
+            <span class="pill">${item.created_at}</span>
+          </div>
+          <p>${item.product_url ? `<a href="${item.product_url}" target="_blank" rel="noreferrer">${item.product_url}</a>` : "Sin URL"}</p>
+        </div>
+        <div class="actions">
+          <button onclick="restoreRejected(${item.id})">Restaurar</button>
+        </div>
+      </article>`
+    )
+    .join("");
 }
 
 async function createDraft(productId) {
@@ -511,16 +562,21 @@ async function runAiSearch(query) {
     openProgress("Busqueda IA en internet");
     logProgress("Preparando busqueda con limite de costo activo.");
     logProgress(`Consulta: ${query || defaultDiscoveryQuery}`);
-    await api("/api/ai/research", {
+    await api("/api/ai/deep-search", {
       method: "POST",
       body: JSON.stringify({ query: query || defaultDiscoveryQuery }),
     });
-    logProgress("Busqueda guardada; productos importados automaticamente a Oportunidades.", "done");
+    logProgress("Deep Search guardado; productos top importados automaticamente a Oportunidades.", "done");
     await refresh();
   } catch (error) {
     status.textContent = error.message;
     logProgress(error.message, "error");
   }
+}
+
+async function restoreRejected(id) {
+  await api(`/api/rejected-candidates/${id}/restore`, { method: "POST" });
+  await refresh();
 }
 
 async function importCandidate(runId, candidateIndex, options = {}) {
@@ -556,17 +612,19 @@ async function discoverAndAnalyze() {
       throw new Error("Limite diario de busquedas IA alcanzado.");
     }
     const query = document.querySelector("#aiQuery")?.value || defaultDiscoveryQuery;
-    logProgress(`Llamando IA web con ${state.openai.model || "gpt-4.1-mini"}.`);
-    logProgress(`Objetivo obligatorio: ${state.openai.required_candidates || 4} productos disponibles y con evidencia.`);
-    logProgress(`Puede tardar varios minutos: hasta ${state.openai.max_attempts || 5} busquedas internas.`);
-    logProgress("Filtrando agotados, saturados, duplicados y candidatos sin link directo de compra.");
-    const research = await api("/api/ai/research", {
+    logProgress("Buscando tendencias Mercado Libre.", "done");
+    logProgress(`Generando pool de hasta ${state.openai.candidate_pool_size || 24} candidatos con IA web.`);
+    logProgress("Verificando proveedor, stock, factura, ML y memoria de descartados.");
+    const research = await api("/api/ai/deep-search", {
       method: "POST",
       body: JSON.stringify({ query }),
     });
     const candidates = research.result?.candidates || [];
     const imported = research.imported || [];
-    logProgress(`IA regreso ${candidates.length} candidato(s).`, "done");
+    (research.result?.stages || []).forEach((stage) => {
+      logProgress(`${stage.stage}: aceptados ${stage.accepted ?? "-"} pool ${stage.pool ?? "-"} rechazados ${stage.rejected ?? "-"}`);
+    });
+    logProgress(`Deep Search eligio ${candidates.length} candidato(s) top.`, "done");
     logProgress(`Importacion automatica: ${imported.length} resultado(s).`, "done");
     for (let index = 0; index < candidates.length; index += 1) {
       const candidate = candidates[index];

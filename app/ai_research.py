@@ -31,6 +31,11 @@ def openai_status() -> dict[str, Any]:
         "max_candidates": int(os.environ.get("AI_MAX_CANDIDATES", DEFAULT_MAX_CANDIDATES)),
         "required_candidates": required_candidates(),
         "max_attempts": max_attempts(),
+        "candidate_pool_size": int(os.environ.get("AI_CANDIDATE_POOL_SIZE", "24")),
+        "deep_search_max_minutes": int(os.environ.get("DEEP_SEARCH_MAX_MINUTES", "20")),
+        "ml_trends_enabled": os.environ.get("ML_TRENDS_ENABLED", "true").lower() in {"1", "true", "yes"},
+        "ml_market_verify_enabled": os.environ.get("ML_MARKET_VERIFY_ENABLED", "true").lower() in {"1", "true", "yes"},
+        "reject_memory_days": int(os.environ.get("REJECT_MEMORY_DAYS", "30")),
         "request_timeout_seconds": int(os.environ.get("OPENAI_REQUEST_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)),
     }
 

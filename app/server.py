@@ -20,6 +20,7 @@ from app.domain import (
     build_purchase_checklist,
 )
 from app.ai_research import enforce_usage_limits, openai_status, research_products
+from app.deep_search import deep_search_products
 from app.meli_auth import build_authorization_url, exchange_code, fetch_me, integration_status
 from app.meli_marketplace import compare_market, publish_listing
 from app.reports import build_investment_plan, plan_to_html, plan_to_pdf_bytes
@@ -33,6 +34,8 @@ from app.storage import (
     fetch_storefront_orders,
     fetch_storefront_products,
     fetch_suppliers,
+    fetch_opportunity_evidence,
+    fetch_rejected_candidates,
     count_ai_research_runs_today,
     get_listing_draft,
     get_investment_plan,
@@ -40,12 +43,14 @@ from app.storage import (
     import_ai_candidate,
     init_db,
     insert_ai_research_run,
+    insert_opportunity_evidence,
     insert_listing_draft,
     insert_purchase_order,
     insert_storefront_order,
     latest_ai_research_run,
     mark_storefront_order_paid,
     reject_product,
+    restore_rejected_candidate,
     seed_demo_data,
     update_storefront_order_stripe,
     update_listing_marketplace,
@@ -153,6 +158,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(stripe_status())
         elif path == "/api/ai/research-runs":
             self.send_json(fetch_ai_research_runs())
+        elif path == "/api/ai/deep-search-runs":
+            runs = [run for run in fetch_ai_research_runs() if run.get("result", {}).get("engine") == "deep_search_v2"]
+            self.send_json(runs)
+        elif path.startswith("/api/opportunities/") and path.endswith("/evidence"):
+            product_id = int(path.split("/")[-2])
+            self.send_json(fetch_opportunity_evidence(product_id))
+        elif path == "/api/rejected-candidates":
+            self.send_json(fetch_rejected_candidates())
         elif path.startswith("/api/investment-plans/"):
             product_id = int(path.rsplit("/", 1)[1].replace(".pdf", ""))
             self.send_investment_plan(product_id, pdf=path.endswith(".pdf"))
@@ -196,6 +209,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/ai/research":
             payload = self.read_json()
             self.create_ai_research(payload)
+        elif path == "/api/ai/deep-search":
+            payload = self.read_json()
+            self.create_deep_search(payload)
         elif path == "/api/ai/import-candidate":
             payload = self.read_json()
             imported = self.import_and_analyze_candidate(int(payload["run_id"]), int(payload["candidate_index"]))
@@ -203,6 +219,10 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/opportunities/reject":
             payload = self.read_json()
             reject_product(int(payload["product_id"]))
+            self.send_json({"ok": True})
+        elif path.startswith("/api/rejected-candidates/") and path.endswith("/restore"):
+            candidate_id = int(path.split("/")[-2])
+            restore_rejected_candidate(candidate_id)
             self.send_json({"ok": True})
         else:
             raise ApiError(404, "Ruta API no encontrada")
@@ -515,6 +535,29 @@ class Handler(BaseHTTPRequestHandler):
             201,
         )
 
+    def create_deep_search(self, payload: dict) -> None:
+        enforce_usage_limits(count_ai_research_runs_today(), latest_ai_research_run())
+        query = payload.get("query") or None
+        result = deep_search_products(query)
+        run_id = insert_ai_research_run(result.get("query") or "", "completed", result)
+        imported: list[dict[str, int | str]] = []
+        for index, _candidate in enumerate(result.get("candidates", [])):
+            try:
+                imported.append(self.import_and_analyze_candidate(run_id, index))
+            except Exception as exc:
+                imported.append({"product_id": 0, "status": f"skipped: {exc}"})
+        self.send_json(
+            {
+                "ok": True,
+                "id": run_id,
+                "result": result,
+                "imported": imported,
+                "reviewed": len(result.get("candidates", [])) + len(result.get("rejected", [])),
+                "rejected": len(result.get("rejected", [])),
+            },
+            201,
+        )
+
     def import_saved_ai_candidates(self) -> list[dict[str, int | str]]:
         imported: list[dict[str, int | str]] = []
         for run in fetch_ai_research_runs():
@@ -531,8 +574,26 @@ class Handler(BaseHTTPRequestHandler):
         product, supplier = get_product_and_supplier(product_id)
         opportunity = analyze_product(product, supplier)
         opportunity_id = upsert_opportunity(opportunity)
+        self.store_candidate_evidence(product_id, run_id, candidate_index)
         self.build_and_store_plan(product_id, opportunity_id)
         return {"product_id": product_id, "status": opportunity.signal.value}
+
+    def store_candidate_evidence(self, product_id: int, run_id: int, candidate_index: int) -> None:
+        run = next((item for item in fetch_ai_research_runs() if int(item["id"]) == run_id), None)
+        if not run:
+            return
+        candidates = run.get("result", {}).get("candidates", [])
+        if candidate_index < 0 or candidate_index >= len(candidates):
+            return
+        candidate = candidates[candidate_index]
+        evidence = {
+            "score_details": candidate.get("score_details"),
+            "market_snapshot": candidate.get("market_snapshot"),
+            "evidence": candidate.get("evidence"),
+            "sources": candidate.get("source_urls", []),
+            "meli_reference_urls": candidate.get("meli_reference_urls", []),
+        }
+        insert_opportunity_evidence(product_id, run_id, evidence)
 
     def build_and_store_plan(self, product_id: int, opportunity_id: int | None = None) -> int:
         row = next((item for item in fetch_opportunities() if int(item["product_id"]) == product_id), None)
