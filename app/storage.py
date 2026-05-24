@@ -201,12 +201,28 @@ def init_db() -> None:
         ensure_column(conn, "storefront_orders", "stripe_checkout_url", "TEXT")
         ensure_column(conn, "storefront_orders", "stripe_payment_status", "TEXT")
         ensure_column(conn, "storefront_orders", "platform_fee", "REAL NOT NULL DEFAULT 0")
+        archive_source_error_rejections(conn)
 
 
 def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
     columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def archive_source_error_rejections(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        UPDATE rejected_candidates
+        SET status = 'source_error'
+        WHERE status = 'active'
+          AND (
+            lower(reason) LIKE '%no se pudo abrir proveedor: http error 404%'
+            OR lower(reason) LIKE '%no se pudo abrir proveedor: http 404%'
+            OR lower(reason) LIKE '%url directa de proveedor rota%'
+          )
+        """
+    )
 
 
 def seed_demo_data() -> None:

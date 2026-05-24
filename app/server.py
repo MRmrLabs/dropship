@@ -30,6 +30,7 @@ from app.local_search import (
 )
 from app.meli_auth import build_authorization_url, exchange_code, fetch_me, integration_status
 from app.meli_marketplace import compare_market, publish_listing
+from app.purchasing_plan import build_purchase_plan
 from app.reports import build_investment_plan, plan_to_html, plan_to_pdf_bytes
 from app.storage import (
     ROOT,
@@ -224,6 +225,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/purchase-orders":
             payload = self.read_json()
             self.create_purchase_order(payload)
+        elif path == "/api/purchase-plan":
+            payload = self.read_json()
+            self.create_purchase_plan(payload)
         elif path == "/api/storefront/orders":
             payload = self.read_json()
             self.create_storefront_order(payload)
@@ -429,6 +433,14 @@ class Handler(BaseHTTPRequestHandler):
         }
         order_id = insert_purchase_order(order)
         self.send_json({"ok": True, "id": order_id, "supplier_route": route}, 201)
+
+    def create_purchase_plan(self, payload: dict) -> None:
+        budget = float(payload.get("budget_mxn") or 0)
+        try:
+            plan = build_purchase_plan(budget, fetch_opportunities())
+        except ValueError as exc:
+            raise ApiError(400, str(exc)) from exc
+        self.send_json({"ok": True, "plan": plan})
 
     def create_storefront_order(self, payload: dict) -> None:
         items = payload.get("items") or []

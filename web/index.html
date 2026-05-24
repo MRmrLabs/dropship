@@ -34,6 +34,7 @@
 
       <nav class="tabs" aria-label="Secciones">
         <button class="tab active" data-tab="opportunities">Radar</button>
+        <button class="tab" data-tab="moneyPlan">Mi dinero</button>
         <button class="tab" data-tab="drafts">Publicaciones</button>
         <button class="tab" data-tab="webSales">Ventas web</button>
         <button class="tab" data-tab="orders">Ordenes</button>
@@ -49,6 +50,23 @@
           <p>Productos agrupados, score comercial y margen real estimado.</p>
         </div>
         <div id="opportunityList" class="grid"></div>
+      </section>
+
+      <section id="moneyPlan" class="panel">
+        <div class="section-head">
+          <div>
+            <h2>Plan con mi dinero</h2>
+            <p>Ingresa presupuesto y PrimeLoot arma una cartera conservadora con compras, cantidades y sobrante reservado.</p>
+          </div>
+        </div>
+        <form id="purchasePlanForm" class="money-form">
+          <label for="budgetInput">Cuanto quieres invertir?</label>
+          <div>
+            <input id="budgetInput" type="number" min="100" step="50" placeholder="5000">
+            <button class="primary" type="submit">Generar plan</button>
+          </div>
+        </form>
+        <div id="purchasePlanResult" class="purchase-plan-result"></div>
       </section>
 
       <section id="drafts" class="panel">

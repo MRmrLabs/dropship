@@ -276,6 +276,9 @@ Evita traer candidatos si solo encuentras:
 - stock bajo, agotado, sin precio, solo cotizacion sin producto claro.
 
 No inventes datos. Si no hay al menos una fuente que apoye proveedor + producto, no incluyas el candidato.
+No inventes URLs de producto. supplier_buy_url debe ser una URL exacta observada en una fuente o resultado web, no un slug construido desde el titulo.
+Si solo encuentras home, catalogo o pagina de categoria del proveedor, no lo presentes como producto comprable; omitelo o baja confianza y explica que falta URL directa.
+No uses rutas genericas tipo /products/nombre-del-producto, /producto/modelo-x o /hubs/modelo si no viste literalmente esa URL en la fuente.
 Nunca uses 0, 1, 9.99 ni valores placeholder en precios. Si no puedes confirmar un precio realista de proveedor y un precio realista de mercado, omite ese candidato.
 Si el costo/stock/envio no esta claro pero el proveedor parece real, marca el riesgo y baja la confianza.
 Busca productos con nombre/modelo concreto. Ejemplo malo: "cables USB-C". Ejemplo bueno: "Cable USB-C a USB-C 100W 2m nylon trenzado marca X modelo Y".

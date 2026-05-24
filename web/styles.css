@@ -460,12 +460,113 @@ button:disabled {
   margin-bottom: 16px;
 }
 
-.searchbar input {
+.searchbar input,
+.money-form input {
   min-height: 42px;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0 12px;
   font-size: 15px;
+}
+
+.money-form {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  max-width: 560px;
+}
+
+.money-form label {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.money-form div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
+.purchase-plan-result {
+  display: grid;
+  gap: 16px;
+}
+
+.money-summary,
+.portfolio-item,
+.reserved-item {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.money-summary {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.money-summary h3 {
+  margin-top: 10px;
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+.allocation-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.allocation-grid div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfe;
+}
+
+.allocation-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.allocation-grid strong {
+  font-size: 18px;
+}
+
+.portfolio-list,
+.reserved-list {
+  display: grid;
+  gap: 12px;
+}
+
+.reserved-list h3 {
+  font-size: 18px;
+}
+
+.portfolio-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 18px;
+  align-items: start;
+  padding: 16px;
+}
+
+.reserved-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+}
+
+.actions.vertical {
+  display: grid;
+  align-content: start;
+  min-width: 130px;
 }
 
 .notice,
@@ -691,18 +792,22 @@ button:disabled {
   .section-head,
   .row,
   .listing-preview,
-  .listing-main {
+  .listing-main,
+  .portfolio-item,
+  .reserved-item {
     grid-template-columns: 1fr;
     display: grid;
   }
 
   .metrics,
   .metric-row,
-  .signal-grid {
+  .signal-grid,
+  .allocation-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .searchbar {
+  .searchbar,
+  .money-form div {
     grid-template-columns: 1fr;
   }
 

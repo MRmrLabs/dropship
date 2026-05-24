@@ -11,6 +11,7 @@ const state = {
   auth: null,
   aiRuns: [],
   rejected: [],
+  purchasePlan: null,
   currentPlanProductId: null,
 };
 
@@ -70,6 +71,7 @@ async function refresh() {
 function render() {
   renderMetrics();
   renderOpportunities();
+  renderPurchasePlan();
   renderDrafts();
   renderStoreOrders();
   renderOrders();
@@ -77,6 +79,91 @@ function render() {
   renderAiResearch();
   renderRejected();
   renderIntegrations();
+}
+
+function renderPurchasePlan() {
+  const target = document.querySelector("#purchasePlanResult");
+  if (!target) return;
+  const plan = state.purchasePlan;
+  if (!plan) {
+    target.innerHTML = `<article class="empty-state"><h3>Sin plan generado</h3><p>Primero llena el radar con oportunidades, despues ingresa tu presupuesto para asignar capital solo a compras con confianza minima de 80%.</p></article>`;
+    return;
+  }
+  const items = plan.items || [];
+  const rejected = plan.rejected_or_reserved || [];
+  target.innerHTML = `
+    <article class="money-summary">
+      <div>
+        <span class="decision ${items.length ? "green" : "yellow"}">${plan.verdict}</span>
+        <h3>${plan.summary}</h3>
+      </div>
+      <div class="allocation-grid">
+        <div><span>Presupuesto</span><strong>${money(plan.budget_mxn)}</strong></div>
+        <div><span>Uso recomendado</span><strong>${money(plan.allocated_mxn)}</strong></div>
+        <div><span>Guardado</span><strong>${money(plan.reserved_mxn)}</strong></div>
+        <div><span>Ganancia esperada</span><strong>${money(plan.expected_profit_mxn)}</strong></div>
+        <div><span>ROI esperado</span><strong>${pct(plan.expected_roi)}</strong></div>
+        <div><span>Confianza</span><strong>${pct(plan.confidence)}</strong></div>
+      </div>
+    </article>
+    <div class="portfolio-list">
+      ${items.length ? items.map(renderPurchasePlanItem).join("") : `<article class="empty-state"><h3>No compro todavia</h3><p>Las oportunidades actuales no superan la regla conservadora de 80% de confianza con riesgo aceptable.</p></article>`}
+    </div>
+    ${
+      rejected.length
+        ? `<section class="reserved-list"><h3>Reservado o rechazado</h3>${rejected.map(renderReservedItem).join("")}</section>`
+        : ""
+    }
+  `;
+}
+
+function renderPurchasePlanItem(item) {
+  return `
+    <article class="portfolio-item">
+      <div>
+        <div class="card-topline">
+          <span class="decision green">${item.recommendation}</span>
+          <span class="score">${pct(item.confidence)} confianza</span>
+        </div>
+        <h3>${item.title}</h3>
+        <p>${item.why}</p>
+        <div class="metric-row">
+          <div><span>Cantidad</span><strong>${item.quantity}</strong></div>
+          <div><span>Inversion</span><strong>${money(item.total_investment)}</strong></div>
+          <div><span>Ganancia esperada</span><strong>${money(item.expected_profit)}</strong></div>
+        </div>
+        <div class="cost-breakdown">
+          <span>Costo max ${money(item.max_buy_price)}</span>
+          <span>Proveedor ${money(item.unit_cost)}</span>
+          <span>Venta sugerida ${money(item.suggested_sale_price)}</span>
+          <span>ROI ${pct(item.expected_roi)}</span>
+        </div>
+        <ol class="checklist">${(item.steps || []).map((step) => `<li>${step}</li>`).join("")}</ol>
+      </div>
+      <div class="actions vertical">
+        <button class="primary" onclick="createOrder(${item.product_id})">Crear orden</button>
+        <button onclick="openInvestmentPlan(${item.product_id})">Ver plan</button>
+        ${item.supplier_url ? `<button onclick="openUrl('${item.supplier_url}')">Proveedor</button>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+function renderReservedItem(item) {
+  const tone = item.recommendation === "rechazar" ? "red" : "yellow";
+  return `
+    <article class="reserved-item">
+      <div>
+        <h3>${item.title}</h3>
+        <p>${item.reason}</p>
+      </div>
+      <div class="meta">
+        <span class="pill ${tone}">${item.recommendation}</span>
+        <span class="pill">Confianza ${pct(item.confidence)}</span>
+        <span class="pill">Valor/u ${money(item.expected_value_unit)}</span>
+      </div>
+    </article>
+  `;
 }
 
 function renderMetrics() {
@@ -600,6 +687,15 @@ async function rejectOpportunity(productId) {
   await refresh();
 }
 
+async function generatePurchasePlan(budgetMxn) {
+  const payload = await api("/api/purchase-plan", {
+    method: "POST",
+    body: JSON.stringify({ budget_mxn: budgetMxn }),
+  });
+  state.purchasePlan = payload.plan;
+  renderPurchasePlan();
+}
+
 async function discoverAndAnalyze() {
   if (busy) return;
   busy = true;
@@ -728,6 +824,27 @@ document.querySelector("#progressClose").addEventListener("click", closeProgress
 document.querySelector("#planClose").addEventListener("click", closePlan);
 document.querySelector("#planPdfBtn").addEventListener("click", downloadPlanPdf);
 document.querySelector("#loginForm").addEventListener("submit", loginAdmin);
+document.querySelector("#purchasePlanForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const budget = Number(document.querySelector("#budgetInput").value || 0);
+  try {
+    await generatePurchasePlan(budget);
+  } catch (error) {
+    state.purchasePlan = {
+      budget_mxn: budget,
+      allocated_mxn: 0,
+      reserved_mxn: budget,
+      expected_profit_mxn: 0,
+      expected_roi: 0,
+      confidence: 0,
+      verdict: "No invertir todavia",
+      summary: error.message,
+      items: [],
+      rejected_or_reserved: [],
+    };
+    renderPurchasePlan();
+  }
+});
 document.querySelector("#aiSearchForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   await runAiSearch(document.querySelector("#aiQuery").value);

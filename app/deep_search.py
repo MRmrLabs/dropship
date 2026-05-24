@@ -109,8 +109,7 @@ class DeepSearchEngine:
                 break
 
         if len(accepted) < target:
-            for item in rejected[-30:]:
-                insert_rejected_candidate(item.get("candidate", {}), item.get("reason", "rechazado"))
+            self.store_rejections(rejected[-30:])
             raise ValueError(
                 f"PrimeLoot reviso {len(raw_candidates)} candidato(s), pero solo {len(accepted)} pasaron. "
                 "No se importo basura: revisa Descargados/Descartados y prueba otra categoria o mas intentos."
@@ -125,8 +124,7 @@ class DeepSearchEngine:
                 result.evidence.get("supplier", {}),
             )
             insert_market_snapshot(None, str(candidate.get("product_title") or ""), result.market)
-        for item in rejected[-40:]:
-            insert_rejected_candidate(item.get("candidate", {}), item.get("reason", "rechazado"))
+        self.store_rejections(rejected[-40:])
 
         return {
             "query": query or default_deep_query(trends),
@@ -138,6 +136,13 @@ class DeepSearchEngine:
             "sources": sources,
             "trends": trends,
         }
+
+    def store_rejections(self, rejected: list[dict[str, Any]]) -> None:
+        for item in rejected:
+            reason = str(item.get("reason") or "rechazado")
+            if is_source_error_reason(reason):
+                continue
+            insert_rejected_candidate(item.get("candidate", {}), reason)
 
     def safe_fetch_trends(self) -> dict[str, Any]:
         trends = self.trends_fetcher(None)
@@ -202,6 +207,14 @@ class OpportunityVerifier:
         provider_snapshot = self.provider_verify(buy_url)
         evidence["supplier"] = provider_snapshot
         if not provider_snapshot.get("available"):
+            if is_broken_product_url(provider_snapshot):
+                root_status = "dominio proveedor abre" if provider_snapshot.get("root_available") else "dominio proveedor no verificable"
+                return self.reject(
+                    candidate,
+                    f"URL directa de proveedor rota ({root_status}); no se opera sin URL exacta de producto",
+                    {},
+                    evidence,
+                )
             return self.reject(candidate, str(provider_snapshot.get("reason") or "Proveedor no verificable"), {}, evidence)
 
         if os.environ.get("ML_MARKET_VERIFY_ENABLED", "true").lower() in {"1", "true", "yes"}:
@@ -455,6 +468,19 @@ def candidate_text(candidate: dict[str, Any]) -> str:
 
 def normalize_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def is_broken_product_url(snapshot: dict[str, Any]) -> bool:
+    return str(snapshot.get("failure_kind") or "") == "http_404"
+
+
+def is_source_error_reason(reason: str) -> bool:
+    text = reason.lower()
+    return (
+        "url directa de proveedor rota" in text
+        or "no se pudo abrir proveedor: http 404" in text
+        or "no se pudo abrir proveedor: http error 404" in text
+    )
 
 
 def empty_score() -> dict[str, Any]:

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from app.deep_search import DeepSearchEngine, OpportunityVerifier, score_candidate
+from app.deep_search import DeepSearchEngine, OpportunityVerifier, is_source_error_reason, score_candidate
 
 
 def candidate(index=1, **overrides):
@@ -77,6 +77,22 @@ class DeepSearchTests(unittest.TestCase):
         result = verifier.verify(candidate(notes="agotado temporalmente"))
         self.assertFalse(result.accepted)
         self.assertIn("Disponibilidad", result.reason)
+
+    @patch("app.deep_search.is_recently_rejected", lambda *args, **kwargs: False)
+    def test_verifier_classifies_404_as_source_error_not_product_rejection(self):
+        verifier = OpportunityVerifier(
+            market,
+            lambda _url: {
+                "available": False,
+                "reason": "No se pudo abrir proveedor: HTTP 404",
+                "failure_kind": "http_404",
+                "root_available": True,
+            },
+        )
+        result = verifier.verify(candidate())
+        self.assertFalse(result.accepted)
+        self.assertIn("URL directa de proveedor rota", result.reason)
+        self.assertTrue(is_source_error_reason(result.reason))
 
     def test_score_candidate_has_subscores(self):
         score = score_candidate(candidate(), market("hub", 399))
