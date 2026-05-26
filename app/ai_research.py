@@ -5,6 +5,7 @@ import os
 import re
 from datetime import datetime, timezone
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -37,6 +38,7 @@ def openai_status() -> dict[str, Any]:
         "ml_market_verify_enabled": os.environ.get("ML_MARKET_VERIFY_ENABLED", "true").lower() in {"1", "true", "yes"},
         "reject_memory_days": int(os.environ.get("REJECT_MEMORY_DAYS", "30")),
         "request_timeout_seconds": int(os.environ.get("OPENAI_REQUEST_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)),
+        "external_web_access": openai_external_web_access(),
     }
 
 
@@ -103,7 +105,7 @@ def request_research(api_key: str, prompt: str) -> tuple[dict[str, Any], dict[st
         "tools": [
             {
                 "type": "web_search",
-                "external_web_access": True,
+                "external_web_access": openai_external_web_access(),
                 "user_location": {
                     "type": "approximate",
                     "country": "MX",
@@ -128,13 +130,37 @@ def request_research(api_key: str, prompt: str) -> tuple[dict[str, Any], dict[st
         method="POST",
     )
     timeout = int(os.environ.get("OPENAI_REQUEST_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS))
-    with urlopen(request, timeout=timeout) as response:
-        raw = json.loads(response.read().decode("utf-8"))
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        raise ValueError(explain_openai_http_error(exc)) from exc
 
     output_text = extract_output_text(raw)
     parsed = parse_json_object(output_text)
     parsed.setdefault("candidates", [])
     return parsed, raw
+
+
+def openai_external_web_access() -> bool:
+    return os.environ.get("OPENAI_EXTERNAL_WEB_ACCESS", "true").lower() in {"1", "true", "yes"}
+
+
+def explain_openai_http_error(exc: HTTPError) -> str:
+    body = ""
+    try:
+        body = exc.read().decode("utf-8", errors="replace")[:800]
+    except Exception:
+        body = ""
+    if exc.code == 403:
+        return (
+            "OpenAI Web Search respondio 403 Forbidden. La API key existe, pero el proyecto/modelo no tiene permiso "
+            "para web_search con acceso externo. Solucion rapida: en Render configura OPENAI_EXTERNAL_WEB_ACCESS=false "
+            "para probar sin web externa, o usa un proyecto/modelo con Web Search habilitado. "
+            "Solucion profesional: conectar Brave Search/SerpAPI como fuente de URLs y dejar OpenAI solo como juez. "
+            f"Detalle OpenAI: {body}"
+        ).strip()
+    return f"OpenAI respondio HTTP {exc.code}: {body or exc.reason}"
 
 
 def enforce_usage_limits(today_count: int, latest_run: dict[str, Any] | None) -> None:

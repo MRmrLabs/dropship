@@ -439,6 +439,7 @@ function renderIntegrations() {
           <span class="pill ${openai.configured ? "green" : "yellow"}">${openai.configured ? "API key configurada" : "Falta OPENAI_API_KEY"}</span>
           <span class="pill">${openai.model || "gpt-4.1-mini"}</span>
           <span class="pill">${openai.tool || "web_search"}</span>
+          <span class="pill ${openai.external_web_access ? "green" : "yellow"}">${openai.external_web_access ? "Web externa" : "Sin web externa"}</span>
         </div>
         <p>Busqueda real con limites de costo y fuentes verificables.</p>
       </div>
@@ -703,7 +704,9 @@ async function discoverAndAnalyze() {
   openProgress("Buscando oportunidades reales");
   try {
     await refresh();
-    if (!state.openai?.configured) throw new Error("Falta configurar OPENAI_API_KEY en Render.");
+    if (!state.openai?.configured && !state.openai?.local_search?.seed_urls_configured) {
+      throw new Error("Falta OPENAI_API_KEY o LOCAL_SUPPLIER_URLS. Sin uno de los dos no hay de donde sacar oportunidades.");
+    }
     if ((state.openai.searches_today || 0) >= (state.openai.daily_limit || 3)) {
       throw new Error("Limite diario de busquedas IA alcanzado.");
     }

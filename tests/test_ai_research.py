@@ -1,8 +1,9 @@
 import unittest
 from datetime import datetime, timedelta, timezone
+from urllib.error import HTTPError
 from unittest.mock import patch
 
-from app.ai_research import enforce_usage_limits, parse_json_object, research_schema, valid_candidates
+from app.ai_research import enforce_usage_limits, explain_openai_http_error, openai_status, parse_json_object, research_schema, valid_candidates
 
 
 class AiResearchTests(unittest.TestCase):
@@ -85,6 +86,16 @@ class AiResearchTests(unittest.TestCase):
         latest = datetime.now(timezone.utc) - timedelta(seconds=30)
         with self.assertRaisesRegex(ValueError, "Espera"):
             enforce_usage_limits(0, {"created_at": latest.strftime("%Y-%m-%d %H:%M:%S")})
+
+    @patch.dict("os.environ", {"OPENAI_EXTERNAL_WEB_ACCESS": "false"}, clear=False)
+    def test_status_exposes_external_web_access_toggle(self):
+        self.assertFalse(openai_status()["external_web_access"])
+
+    def test_403_error_explains_web_search_permission(self):
+        error = HTTPError("https://api.openai.com/v1/responses", 403, "Forbidden", None, None)
+        message = explain_openai_http_error(error)
+        self.assertIn("Web Search", message)
+        self.assertIn("OPENAI_EXTERNAL_WEB_ACCESS=false", message)
 
 
 if __name__ == "__main__":

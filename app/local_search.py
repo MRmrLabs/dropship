@@ -102,7 +102,32 @@ def run_local_search_job(job_id: str) -> None:
                 result = deep_search_products(str(job.get("query") or ""))
                 result["engine"] = "primeloot_local_plus_openai"
             except Exception as exc:
-                add_progress(job_id, "openai opcional", f"OpenAI no completo finalistas: {exc}", ok=False)
+                message = f"OpenAI no completo finalistas: {exc}"
+                add_progress(job_id, "openai opcional", message, ok=False)
+                if not result.get("candidates"):
+                    set_job(
+                        job_id,
+                        status="failed",
+                        error=(
+                            message
+                            + " No habia LOCAL_SUPPLIER_URLS verificables para continuar sin OpenAI. "
+                            "Configura proveedores semilla o conecta un motor de busqueda dedicado."
+                        ),
+                        result=result,
+                    )
+                    return
+
+        if not result.get("candidates"):
+            set_job(
+                job_id,
+                status="failed",
+                error=(
+                    "No se encontraron candidatos. LOCAL_SUPPLIER_URLS esta vacio o no produjo oportunidades, "
+                    "y no hubo finalistas por IA. Configura proveedores semilla o un motor de busqueda web."
+                ),
+                result=result,
+            )
+            return
 
         add_progress(job_id, "seleccionando top 4", f"{len(result.get('candidates', []))} candidato(s) final(es)")
         set_job(job_id, status="completed", result=result)
